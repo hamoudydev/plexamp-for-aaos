@@ -1,6 +1,5 @@
 package us.berkovitz.plexaaos
 
-import android.accounts.AccountManager
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
@@ -21,19 +20,26 @@ import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.audio.AudioAttributes
+import com.google.android.exoplayer2.database.StandaloneDatabaseProvider
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector.CustomActionProvider
 import com.google.android.exoplayer2.ext.mediasession.TimelineQueueNavigator
+import com.google.android.exoplayer2.offline.DownloadManager
+import com.google.android.exoplayer2.offline.DownloadRequest
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
+import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
+import com.google.android.exoplayer2.upstream.cache.Cache
+import com.google.android.exoplayer2.upstream.cache.CacheDataSource
+import com.google.android.exoplayer2.upstream.cache.LeastRecentlyUsedCacheEvictor
+import com.google.android.exoplayer2.upstream.cache.SimpleCache
 import com.google.android.exoplayer2.util.Util
+import java.io.File
+import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import us.berkovitz.plexaaos.extensions.displayDescription
-import us.berkovitz.plexaaos.extensions.displaySubtitle
-import us.berkovitz.plexaaos.extensions.displayTitle
 import us.berkovitz.plexaaos.extensions.flag
 import us.berkovitz.plexaaos.extensions.id
 import us.berkovitz.plexaaos.extensions.title
@@ -44,7 +50,6 @@ import us.berkovitz.plexaaos.library.PlexSource
 import us.berkovitz.plexaaos.library.UAMP_BROWSABLE_ROOT
 import us.berkovitz.plexaaos.library.UAMP_PLAYLISTS_ROOT
 import us.berkovitz.plexaaos.library.buildMeta
-import us.berkovitz.plexapi.media.Playlist
 import us.berkovitz.plexapi.media.Track
 import us.berkovitz.plexapi.myplex.AuthorizationException
 import kotlin.math.ceil
@@ -128,6 +133,72 @@ class MyMusicService : MediaBrowserServiceCompat() {
     private var wasActive = false
     private var previousPosition: Long = 0
 
+    // ExoPlayer cache infrastructure
+    private val downloadCache: Cache by lazy {
+        val cacheDir = File(cacheDir, "exoplayer_cache")
+        val databaseProvider = StandaloneDatabaseProvider(this)
+        SimpleCache(cacheDir, LeastRecentlyUsedCacheEvictor(200L * 1024L * 1024L), databaseProvider)
+    }
+
+    // DownloadManager Listener to track download events
+    private val downloadListener = object : DownloadManager.Listener {
+        override fun onDownloadChanged(
+            downloadManager: DownloadManager,
+            download: com.google.android.exoplayer2.offline.Download,
+            finalException: Exception?
+        ) {
+            val logger = PlexLoggerFactory.loggerFor(android.app.DownloadManager::class)
+            when (download.state) {
+                com.google.android.exoplayer2.offline.Download.STATE_COMPLETED -> {
+                    logger.debug("Download completed: ${download.request.id}")
+                }
+                com.google.android.exoplayer2.offline.Download.STATE_FAILED -> {
+                    logger.error("Download failed: ${download.request.id}, error: ${finalException?.message}")
+                }
+                com.google.android.exoplayer2.offline.Download.STATE_DOWNLOADING -> {
+                    val progress = download.percentDownloaded
+                    logger.debug("Downloading: ${download.request.id}, progress: $progress%")
+                }
+                com.google.android.exoplayer2.offline.Download.STATE_QUEUED -> {
+                    logger.debug("Download queued: ${download.request.id}")
+                }
+                com.google.android.exoplayer2.offline.Download.STATE_REMOVING -> {
+                    logger.debug("Download removing: ${download.request.id}")
+                }
+                com.google.android.exoplayer2.offline.Download.STATE_RESTARTING -> {
+                    logger.debug("Download restarting: ${download.request.id}")
+                }
+                com.google.android.exoplayer2.offline.Download.STATE_STOPPED -> {
+                    logger.debug("Download stopped: ${download.request.id}")
+                }
+            }
+        }
+
+        override fun onDownloadRemoved(
+            downloadManager: DownloadManager,
+            download: com.google.android.exoplayer2.offline.Download
+        ) {
+            logger.debug("Download removed: ${download.request.id}")
+        }
+    }
+
+    // ExoPlayer DownloadManager for prefetching
+    private val downloadManager: DownloadManager by lazy {
+        val downloadExecutor = Executors.newFixedThreadPool(6)
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+        DownloadManager(
+            this,
+            StandaloneDatabaseProvider(this),
+            downloadCache,
+            httpDataSourceFactory,
+            downloadExecutor
+        ).apply {
+            maxParallelDownloads = 3
+            requirements = DownloadManager.DEFAULT_REQUIREMENTS
+            addListener(downloadListener)
+        }
+    }
+
     /**
      * This must be `by lazy` because the source won't initially be ready.
      * See [MusicService.onLoadChildren] to see where it's accessed (and first
@@ -145,16 +216,25 @@ class MyMusicService : MediaBrowserServiceCompat() {
     private val playerListener = PlayerEventListener()
 
     /**
-     * Configure ExoPlayer to handle audio focus for us.
+     * Configure ExoPlayer to handle audio focus for us and use cache for playback.
      * See [Player.AudioComponent.setAudioAttributes] for details.
      */
     private val exoPlayer: ExoPlayer by lazy {
-        ExoPlayer.Builder(this).build().apply {
-            setAudioAttributes(playerAudioAttributes, true)
-            setHandleAudioBecomingNoisy(true)
-            addListener(playerListener)
-            repeatMode = Player.REPEAT_MODE_ALL
-        }
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(downloadCache)
+            .setUpstreamDataSourceFactory(DefaultHttpDataSource.Factory())
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+        ExoPlayer.Builder(this)
+            .setMediaSourceFactory(
+                com.google.android.exoplayer2.source.DefaultMediaSourceFactory(cacheDataSourceFactory)
+            )
+            .build().apply {
+                setAudioAttributes(playerAudioAttributes, true)
+                setHandleAudioBecomingNoisy(true)
+                addListener(playerListener)
+                repeatMode = Player.REPEAT_MODE_ALL
+            }
     }
 
     private inner class AutomotiveCommandReceiver : MediaSessionConnector.CommandReceiver {
@@ -292,6 +372,20 @@ class MyMusicService : MediaBrowserServiceCompat() {
         // Cancel coroutines when the service is going away.
         serviceJob.cancel()
 
+        // Release download manager and cache resources.
+        try {
+            downloadManager.removeListener(downloadListener)
+            downloadManager.release()
+        } catch (e: Exception) {
+            // downloadManager might not have been initialized
+        }
+
+        try {
+            downloadCache.release()
+        } catch (e: Exception) {
+            // downloadCache might not have been initialized
+        }
+
         // Free ExoPlayer resources.
         exoPlayer.removeListener(playerListener)
         exoPlayer.release()
@@ -404,12 +498,15 @@ class MyMusicService : MediaBrowserServiceCompat() {
                     val children = mutableListOf<MediaItem>()
                     var plistItems = plist.loadedItems()
                     if (pageNum != null) {
-                        plistItems = plistItems.sliceArray(
-                            IntRange(
-                                pageNum * PAGE_SIZE,
-                                (pageNum + 1) * PAGE_SIZE - 1
-                            )
-                        )
+                        val totalItems = plistItems.size
+                        val startIndex = pageNum * PAGE_SIZE
+                        val endExclusive = min((pageNum + 1) * PAGE_SIZE, totalItems)
+
+                        plistItems = if (startIndex >= totalItems) {
+                            emptyArray()
+                        } else {
+                            plistItems.sliceArray(IntRange(startIndex, endExclusive - 1))
+                        }
                     }
                     plistItems.forEach { item ->
                         if (item !is Track) {
@@ -568,8 +665,77 @@ class MyMusicService : MediaBrowserServiceCompat() {
             metadataList.map { it.toMediaItem() }, initialWindowIndex, playbackStartPositionMs
         )
         currentPlayer.prepare()
+
+        // Prefetch next tracks using ExoPlayer's DownloadManager
+        prefetchNextTracks(metadataList, initialWindowIndex, 5)
+
         active = true
         wasActive = true
+    }
+
+    /**
+     * Prefetch next N tracks using ExoPlayer's DownloadManager.
+     * Respects shuffle mode by using the player's timeline to determine the actual next tracks.
+     */
+    private fun prefetchNextTracks(
+        metadataList: List<MediaMetadataCompat>,
+        currentIndex: Int,
+        count: Int = 5
+    ) {
+        if (metadataList.isEmpty() || !this::currentPlayer.isInitialized) return
+
+        val timeline = currentPlayer.currentTimeline
+        if (timeline.isEmpty) return
+
+        val currentWindowIndex = currentPlayer.currentMediaItemIndex
+        val indicesToPrefetch = mutableListOf<Int>()
+
+        // Get the next N windows in playback order (respects shuffle mode)
+        var nextWindowIndex = timeline.getNextWindowIndex(
+            currentWindowIndex,
+            currentPlayer.repeatMode,
+            currentPlayer.shuffleModeEnabled
+        )
+
+        var remaining = count
+        while (nextWindowIndex != C.INDEX_UNSET && remaining > 0) {
+            indicesToPrefetch.add(nextWindowIndex)
+            remaining--
+
+            // Get the next window after this one
+            nextWindowIndex = timeline.getNextWindowIndex(
+                nextWindowIndex,
+                currentPlayer.repeatMode,
+                currentPlayer.shuffleModeEnabled
+            )
+
+            // Prevent infinite loop in case of repeat mode
+            if (indicesToPrefetch.size >= min(count, timeline.windowCount)) {
+                break
+            }
+        }
+
+        // Prefetch the tracks in the order they will actually play
+        for (windowIndex in indicesToPrefetch) {
+            if (windowIndex >= 0 && windowIndex < metadataList.size) {
+                val meta = metadataList[windowIndex]
+                val uri = meta.description.mediaUri ?: continue
+                val id = meta.description.mediaId ?: uri.toString()
+
+                try {
+                    // Create download request for the track
+                    val downloadRequest = DownloadRequest.Builder(id, uri)
+                        .build()
+
+                    // Add to download manager (it will cache the content)
+                    downloadManager.addDownload(downloadRequest)
+                    downloadManager.resumeDownloads()
+                    logger.debug("Prefetching track at index $windowIndex: $id (shuffle: ${currentPlayer.shuffleModeEnabled})")
+                } catch (e: Exception) {
+                    logger.error("Failed to add download for $id: ${e.message}")
+                }
+            }
+        }
     }
 
     private fun switchToPlayer(previousPlayer: Player?, newPlayer: Player) {
@@ -739,6 +905,11 @@ class MyMusicService : MediaBrowserServiceCompat() {
                 || events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED)
             ) {
                 saveLastSong()
+                try {
+                    prefetchNextTracks(currentPlaylistItems, currentPlayer.currentMediaItemIndex, 5)
+                } catch (t: Throwable) {
+                    logger.error("prefetch failed: ${t.message}")
+                }
             }
         }
 
@@ -767,6 +938,8 @@ class MyMusicService : MediaBrowserServiceCompat() {
                 Toast.LENGTH_LONG
             ).show()
         }
+
+
     }
 
     private fun saveLastSong() {
