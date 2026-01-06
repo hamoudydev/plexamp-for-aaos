@@ -7,7 +7,9 @@ The application is available in the [Play Store](https://play.google.com/store/a
 ## Features
 
 ### Music Browsing
-- **Playlists** - Browse and play your Plex playlists
+- **Home** - Quick access to Recently Played tracks and Recently Added albums
+- **Playlists** - Browse and play your Plex playlists (large playlists grouped alphabetically)
+- **All Music** - Browse all tracks in your library, grouped alphabetically (A-Z, #)
 - **Artists** - Browse all artists, view their albums, and play tracks
 - **Albums** - Browse all albums and play tracks
 
@@ -25,13 +27,20 @@ The application is available in the [Play Store](https://play.google.com/store/a
 
 ```
 Root
+├── Home
+│   ├── Recently Played → Tracks
+│   └── Recently Added → Albums → Tracks
 ├── Playlists
-│   └── [Playlist] → Tracks
+│   └── [Playlist] → [A-Z groups] → Tracks
+├── All Music
+│   └── [A-Z] → Tracks
 ├── Artists
 │   └── [Artist] → [Albums] → Tracks
 └── Albums
     └── [Album] → Tracks
 ```
+
+*Note: Android Auto displays up to 4 tabs. The order is: Home, Playlists, All Music, Artists (Albums is accessible but may require scrolling).*
 
 ## Screenshots
 
@@ -46,9 +55,12 @@ Root
 ## Changelog
 
 ### v0.8.0 (Unreleased)
+- Added Home tab with Recently Played and Recently Added sections
+- Added All Music tab - browse all tracks grouped alphabetically (A-Z, #)
+- Large playlists now grouped alphabetically instead of by page numbers
 - Added Artists browsing - view all artists, their albums, and tracks
 - Added Albums browsing - view all albums and their tracks
-- New icons for Artists and Albums categories
+- New icons for browse categories
 - Playback support for album-based track selection
 
 ### v0.7.2

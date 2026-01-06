@@ -78,6 +78,14 @@ class BrowseTree(
         mediaIdToChildren.clear()
         val rootList = mediaIdToChildren[UAMP_BROWSABLE_ROOT] ?: mutableListOf()
 
+        val homeMetadata = MediaMetadataCompat.Builder().apply {
+            id = UAMP_HOME_ROOT
+            title = context.getString(R.string.home_title)
+            albumArtUri = RESOURCE_ROOT_URI +
+                    context.resources.getResourceEntryName(R.drawable.baseline_home_24)
+            flag = MediaItem.FLAG_BROWSABLE
+        }.build()
+
         val playlistsMetadata = MediaMetadataCompat.Builder().apply {
             id = UAMP_PLAYLISTS_ROOT
             title = context.getString(R.string.playlists_title)
@@ -102,7 +110,17 @@ class BrowseTree(
             flag = MediaItem.FLAG_BROWSABLE
         }.build()
 
+        val allMusicMetadata = MediaMetadataCompat.Builder().apply {
+            id = UAMP_ALL_MUSIC_ROOT
+            title = context.getString(R.string.all_music_title)
+            albumArtUri = RESOURCE_ROOT_URI +
+                    context.resources.getResourceEntryName(R.drawable.baseline_library_music_24)
+            flag = MediaItem.FLAG_BROWSABLE
+        }.build()
+
+        rootList += homeMetadata
         rootList += playlistsMetadata
+        rootList += allMusicMetadata
         rootList += artistsMetadata
         rootList += albumsMetadata
         mediaIdToChildren[UAMP_BROWSABLE_ROOT] = rootList
@@ -209,7 +227,7 @@ fun MediaMetadataCompat.Builder.from(
         null
     }
 
-    if (iconUrl != null) {
+    if (iconUrl != null && mediaItem._server != null) {
         iconUrl = mediaItem._server!!.urlFor(iconUrl)
         iconUrl = AlbumArtContentProvider.mapUri(Uri.parse(iconUrl)).toString()
     }
@@ -346,9 +364,15 @@ const val UAMP_EMPTY_ROOT = "@empty@"
 const val UAMP_PLAYLISTS_ROOT = "__PLAYLISTS__"
 const val UAMP_ARTISTS_ROOT = "__ARTISTS__"
 const val UAMP_ALBUMS_ROOT = "__ALBUMS__"
+const val UAMP_HOME_ROOT = "__HOME__"
+const val UAMP_RECENTLY_PLAYED_ROOT = "__RECENTLY_PLAYED__"
+const val UAMP_RECENTLY_ADDED_ROOT = "__RECENTLY_ADDED__"
+const val UAMP_ON_DECK_ROOT = "__ON_DECK__"
+const val UAMP_ALL_MUSIC_ROOT = "__ALL_MUSIC__"
 
 // Prefixes for media IDs
 const val ARTIST_PREFIX = "artist_"
 const val ALBUM_PREFIX = "album_"
+const val HOME_PREFIX = "home_"
 
 const val RESOURCE_ROOT_URI = "android.resource://us.berkovitz.plexaaos/drawable/"

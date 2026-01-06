@@ -39,6 +39,12 @@ class PlexSource(
     private var artistAlbumsCache: MutableMap<String, List<Album>> = hashMapOf()
     private var albumTracksCache: MutableMap<String, List<Track>> = hashMapOf()
 
+    // Home tab caches
+    private var recentlyPlayedCache: List<Track> = emptyList()
+    private var recentlyAddedCache: List<Album> = emptyList()
+    private var onDeckCache: List<Track> = emptyList()
+    private var allTracksCache: List<Track> = emptyList()
+
     init {
         state = STATE_INITIALIZING
     }
@@ -304,4 +310,168 @@ class PlexSource(
     override fun getAlbums(): List<Album> = albumsCache
 
     override fun getAlbumTracks(albumId: String): List<Track>? = albumTracksCache[albumId]
+
+    // Home tab implementations
+
+    override suspend fun loadRecentlyPlayed(): List<Track> {
+        return withContext(Dispatchers.IO) {
+            findServer()
+            if (plexServer == null) {
+                logger.warn("Cannot load recently played: server not available")
+                setRecentlyPlayedState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+
+            // Ensure music section is found
+            if (musicSectionId == null) {
+                try {
+                    val musicSection = plexServer!!.musicSection()
+                    if (musicSection != null) {
+                        musicSectionId = musicSection.key
+                        logger.info("Found music section for recently played: ${musicSection.title}")
+                    }
+                } catch (e: Exception) {
+                    logger.error("Error finding music section: ${e.message}")
+                }
+            }
+
+            if (musicSectionId == null) {
+                logger.warn("Cannot load recently played: music section not found")
+                setRecentlyPlayedState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+
+            try {
+                setRecentlyPlayedState(STATE_INITIALIZING, null)
+                val tracks = plexServer!!.recentlyPlayedTracks(musicSectionId!!, 50)
+                recentlyPlayedCache = tracks
+                setRecentlyPlayedState(STATE_INITIALIZED, tracks)
+                logger.info("Loaded ${tracks.size} recently played tracks")
+                return@withContext tracks
+            } catch (e: Exception) {
+                logger.error("Error loading recently played: ${e.message}")
+                setRecentlyPlayedState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+        }
+    }
+
+    override suspend fun loadRecentlyAdded(): List<Album> {
+        return withContext(Dispatchers.IO) {
+            findServer()
+            if (plexServer == null) {
+                logger.warn("Cannot load recently added: server not available")
+                setRecentlyAddedState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+
+            // Ensure music section is found
+            if (musicSectionId == null) {
+                try {
+                    val musicSection = plexServer!!.musicSection()
+                    if (musicSection != null) {
+                        musicSectionId = musicSection.key
+                        logger.info("Found music section for recently added: ${musicSection.title}")
+                    }
+                } catch (e: Exception) {
+                    logger.error("Error finding music section: ${e.message}")
+                }
+            }
+
+            if (musicSectionId == null) {
+                logger.warn("Cannot load recently added: music section not found")
+                setRecentlyAddedState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+
+            try {
+                setRecentlyAddedState(STATE_INITIALIZING, null)
+                val albums = plexServer!!.recentlyAddedAlbums(musicSectionId!!, 50)
+                recentlyAddedCache = albums
+                setRecentlyAddedState(STATE_INITIALIZED, albums)
+                logger.info("Loaded ${albums.size} recently added albums")
+                return@withContext albums
+            } catch (e: Exception) {
+                logger.error("Error loading recently added: ${e.message}")
+                setRecentlyAddedState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+        }
+    }
+
+    override suspend fun loadOnDeck(): List<Track> {
+        return withContext(Dispatchers.IO) {
+            findServer()
+            if (plexServer == null) {
+                logger.warn("Cannot load on deck: server not available")
+                return@withContext emptyList()
+            }
+
+            try {
+                setOnDeckState(STATE_INITIALIZING, null)
+                val tracks = plexServer!!.onDeck()
+                onDeckCache = tracks
+                setOnDeckState(STATE_INITIALIZED, tracks)
+                logger.info("Loaded ${tracks.size} on deck tracks")
+                return@withContext tracks
+            } catch (e: Exception) {
+                logger.error("Error loading on deck: ${e.message}")
+                setOnDeckState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+        }
+    }
+
+    override fun getRecentlyPlayed(): List<Track> = recentlyPlayedCache
+
+    override fun getRecentlyAdded(): List<Album> = recentlyAddedCache
+
+    override fun getOnDeck(): List<Track> = onDeckCache
+
+    // All Music implementation
+
+    override suspend fun loadAllTracks(): List<Track> {
+        return withContext(Dispatchers.IO) {
+            findServer()
+            if (plexServer == null) {
+                logger.warn("Cannot load all tracks: server not available")
+                setAllTracksState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+
+            // Ensure music section is found
+            if (musicSectionId == null) {
+                try {
+                    val musicSection = plexServer!!.musicSection()
+                    if (musicSection != null) {
+                        musicSectionId = musicSection.key
+                        logger.info("Found music section for all tracks: ${musicSection.title}")
+                    }
+                } catch (e: Exception) {
+                    logger.error("Error finding music section: ${e.message}")
+                }
+            }
+
+            if (musicSectionId == null) {
+                logger.warn("Cannot load all tracks: music section not found")
+                setAllTracksState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+
+            try {
+                setAllTracksState(STATE_INITIALIZING, null)
+                val tracks = plexServer!!.tracks(musicSectionId!!)
+                allTracksCache = tracks
+                setAllTracksState(STATE_INITIALIZED, tracks)
+                logger.info("Loaded ${tracks.size} tracks from library")
+                return@withContext tracks
+            } catch (e: Exception) {
+                logger.error("Error loading all tracks: ${e.message}")
+                setAllTracksState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+        }
+    }
+
+    override fun getAllTracks(): List<Track> = allTracksCache
 }

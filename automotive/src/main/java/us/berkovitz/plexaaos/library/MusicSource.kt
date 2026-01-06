@@ -119,6 +119,70 @@ interface MusicSource : Iterable<Playlist> {
      * Callback when album's tracks are ready.
      */
     fun albumTracksWhenReady(albumId: String, performAction: (List<Track>?) -> Unit): Boolean
+
+    // Home tab methods
+
+    /**
+     * Load recently played tracks.
+     */
+    suspend fun loadRecentlyPlayed(): List<Track>
+
+    /**
+     * Load recently added albums.
+     */
+    suspend fun loadRecentlyAdded(): List<Album>
+
+    /**
+     * Load on deck / continue listening tracks.
+     */
+    suspend fun loadOnDeck(): List<Track>
+
+    /**
+     * Get cached recently played tracks.
+     */
+    fun getRecentlyPlayed(): List<Track>
+
+    /**
+     * Get cached recently added albums.
+     */
+    fun getRecentlyAdded(): List<Album>
+
+    /**
+     * Get cached on deck tracks.
+     */
+    fun getOnDeck(): List<Track>
+
+    /**
+     * Callback when recently played are ready.
+     */
+    fun recentlyPlayedWhenReady(performAction: (List<Track>?) -> Unit): Boolean
+
+    /**
+     * Callback when recently added are ready.
+     */
+    fun recentlyAddedWhenReady(performAction: (List<Album>?) -> Unit): Boolean
+
+    /**
+     * Callback when on deck are ready.
+     */
+    fun onDeckWhenReady(performAction: (List<Track>?) -> Unit): Boolean
+
+    // All Music methods
+
+    /**
+     * Load all tracks from the music library.
+     */
+    suspend fun loadAllTracks(): List<Track>
+
+    /**
+     * Get cached all tracks.
+     */
+    fun getAllTracks(): List<Track>
+
+    /**
+     * Callback when all tracks are ready.
+     */
+    fun allTracksWhenReady(performAction: (List<Track>?) -> Unit): Boolean
 }
 
 @IntDef(
@@ -257,6 +321,21 @@ abstract class AbstractMusicSource : MusicSource {
     private val artistAlbumsReadyListeners = mutableMapOf<String, MutableList<(List<Album>?) -> Unit>>()
     private val albumTracksReadyListeners = mutableMapOf<String, MutableList<(List<Track>?) -> Unit>>()
 
+    // State management for Home tab features
+    @State
+    protected var recentlyPlayedState: Int = STATE_CREATED
+    @State
+    protected var recentlyAddedState: Int = STATE_CREATED
+    @State
+    protected var onDeckState: Int = STATE_CREATED
+    @State
+    protected var allTracksState: Int = STATE_CREATED
+
+    private val recentlyPlayedReadyListeners = mutableListOf<(List<Track>?) -> Unit>()
+    private val recentlyAddedReadyListeners = mutableListOf<(List<Album>?) -> Unit>()
+    private val onDeckReadyListeners = mutableListOf<(List<Track>?) -> Unit>()
+    private val allTracksReadyListeners = mutableListOf<(List<Track>?) -> Unit>()
+
     protected fun setArtistsState(state: Int, artists: List<Artist>?) {
         synchronized(artistsReadyListeners) {
             artistsState = state
@@ -362,6 +441,106 @@ abstract class AbstractMusicSource : MusicSource {
                 }
                 else -> {
                     performAction(getAlbumTracks(albumId))
+                    true
+                }
+            }
+        }
+
+    // Home tab state management
+
+    protected fun setRecentlyPlayedState(state: Int, tracks: List<Track>?) {
+        synchronized(recentlyPlayedReadyListeners) {
+            recentlyPlayedState = state
+            if (state == STATE_INITIALIZED || state == STATE_ERROR) {
+                recentlyPlayedReadyListeners.forEach { it(tracks) }
+                recentlyPlayedReadyListeners.clear()
+            }
+        }
+    }
+
+    protected fun setRecentlyAddedState(state: Int, albums: List<Album>?) {
+        synchronized(recentlyAddedReadyListeners) {
+            recentlyAddedState = state
+            if (state == STATE_INITIALIZED || state == STATE_ERROR) {
+                recentlyAddedReadyListeners.forEach { it(albums) }
+                recentlyAddedReadyListeners.clear()
+            }
+        }
+    }
+
+    protected fun setOnDeckState(state: Int, tracks: List<Track>?) {
+        synchronized(onDeckReadyListeners) {
+            onDeckState = state
+            if (state == STATE_INITIALIZED || state == STATE_ERROR) {
+                onDeckReadyListeners.forEach { it(tracks) }
+                onDeckReadyListeners.clear()
+            }
+        }
+    }
+
+    override fun recentlyPlayedWhenReady(performAction: (List<Track>?) -> Unit): Boolean =
+        synchronized(recentlyPlayedReadyListeners) {
+            when (recentlyPlayedState) {
+                STATE_CREATED, STATE_INITIALIZING -> {
+                    recentlyPlayedReadyListeners += performAction
+                    false
+                }
+                else -> {
+                    performAction(getRecentlyPlayed())
+                    true
+                }
+            }
+        }
+
+    override fun recentlyAddedWhenReady(performAction: (List<Album>?) -> Unit): Boolean =
+        synchronized(recentlyAddedReadyListeners) {
+            when (recentlyAddedState) {
+                STATE_CREATED, STATE_INITIALIZING -> {
+                    recentlyAddedReadyListeners += performAction
+                    false
+                }
+                else -> {
+                    performAction(getRecentlyAdded())
+                    true
+                }
+            }
+        }
+
+    override fun onDeckWhenReady(performAction: (List<Track>?) -> Unit): Boolean =
+        synchronized(onDeckReadyListeners) {
+            when (onDeckState) {
+                STATE_CREATED, STATE_INITIALIZING -> {
+                    onDeckReadyListeners += performAction
+                    false
+                }
+                else -> {
+                    performAction(getOnDeck())
+                    true
+                }
+            }
+        }
+
+    // All tracks state management
+
+    protected fun setAllTracksState(state: Int, tracks: List<Track>?) {
+        synchronized(allTracksReadyListeners) {
+            allTracksState = state
+            if (state == STATE_INITIALIZED || state == STATE_ERROR) {
+                allTracksReadyListeners.forEach { it(tracks) }
+                allTracksReadyListeners.clear()
+            }
+        }
+    }
+
+    override fun allTracksWhenReady(performAction: (List<Track>?) -> Unit): Boolean =
+        synchronized(allTracksReadyListeners) {
+            when (allTracksState) {
+                STATE_CREATED, STATE_INITIALIZING -> {
+                    allTracksReadyListeners += performAction
+                    false
+                }
+                else -> {
+                    performAction(getAllTracks())
                     true
                 }
             }

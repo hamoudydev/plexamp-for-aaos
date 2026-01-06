@@ -49,10 +49,16 @@ import us.berkovitz.plexaaos.library.ARTIST_PREFIX
 import us.berkovitz.plexaaos.library.BrowseTree
 import us.berkovitz.plexaaos.library.MusicSource
 import us.berkovitz.plexaaos.library.PlexSource
+import us.berkovitz.plexaaos.library.HOME_PREFIX
+import us.berkovitz.plexaaos.library.RESOURCE_ROOT_URI
 import us.berkovitz.plexaaos.library.UAMP_ALBUMS_ROOT
+import us.berkovitz.plexaaos.library.UAMP_ALL_MUSIC_ROOT
 import us.berkovitz.plexaaos.library.UAMP_ARTISTS_ROOT
 import us.berkovitz.plexaaos.library.UAMP_BROWSABLE_ROOT
+import us.berkovitz.plexaaos.library.UAMP_HOME_ROOT
 import us.berkovitz.plexaaos.library.UAMP_PLAYLISTS_ROOT
+import us.berkovitz.plexaaos.library.UAMP_RECENTLY_ADDED_ROOT
+import us.berkovitz.plexaaos.library.UAMP_RECENTLY_PLAYED_ROOT
 import us.berkovitz.plexaaos.library.buildMeta
 import us.berkovitz.plexaaos.library.from
 import us.berkovitz.plexaaos.library.fromAlbumTrack
@@ -463,8 +469,15 @@ class MyMusicService : MediaBrowserServiceCompat() {
                 resultsSent = mediaSource.whenReady { successfullyInitialized ->
                     if (successfullyInitialized) {
                         browseTree.refresh()
-                        val children = browseTree[parentMediaId]?.sortedBy { item -> item.title }?.map { item ->
-                            MediaItem(item.description, item.flag)
+                        // Don't sort root menu items - preserve order (Home first)
+                        // Only sort playlists alphabetically
+                        val items = browseTree[parentMediaId]
+                        val children = if (parentMediaId == UAMP_BROWSABLE_ROOT) {
+                            items?.map { item -> MediaItem(item.description, item.flag) }
+                        } else {
+                            items?.sortedBy { item -> item.title }?.map { item ->
+                                MediaItem(item.description, item.flag)
+                            }
                         } ?: listOf()
                         logger.info("Sending ${children.size} results for $parentMediaId")
                         result.sendResult(children)
@@ -516,6 +529,149 @@ class MyMusicService : MediaBrowserServiceCompat() {
                             MediaItem(metadata.description, MediaItem.FLAG_BROWSABLE)
                         }
                         logger.info("Sending ${children.size} albums")
+                        result.sendResult(children)
+                    } else {
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
+                    }
+                }
+            }
+
+            // Home root - show home menu items
+            parentMediaId == UAMP_HOME_ROOT -> {
+                val children = mutableListOf<MediaItem>()
+
+                // Recently Played - no icon, Android Auto will show generic placeholder
+                val recentlyPlayedMetadata = MediaMetadataCompat.Builder().apply {
+                    putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, UAMP_RECENTLY_PLAYED_ROOT)
+                    putString(MediaMetadataCompat.METADATA_KEY_TITLE, getString(R.string.recently_played_title))
+                    putLong(MediaMetadataCompat.METADATA_KEY_BT_FOLDER_TYPE, MediaDescriptionCompat.BT_FOLDER_TYPE_PLAYLISTS.toLong())
+                }.build()
+                children += MediaItem(recentlyPlayedMetadata.description, MediaItem.FLAG_BROWSABLE)
+
+                // Recently Added
+                val recentlyAddedMetadata = MediaMetadataCompat.Builder().apply {
+                    putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, UAMP_RECENTLY_ADDED_ROOT)
+                    putString(MediaMetadataCompat.METADATA_KEY_TITLE, getString(R.string.recently_added_title))
+                    putLong(MediaMetadataCompat.METADATA_KEY_BT_FOLDER_TYPE, MediaDescriptionCompat.BT_FOLDER_TYPE_PLAYLISTS.toLong())
+                }.build()
+                children += MediaItem(recentlyAddedMetadata.description, MediaItem.FLAG_BROWSABLE)
+
+                logger.info("Sending ${children.size} home menu items")
+                result.sendResult(children)
+                resultsSent = true
+            }
+
+            // Recently Played - load recently played tracks
+            parentMediaId == UAMP_RECENTLY_PLAYED_ROOT -> {
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadRecentlyPlayed()
+                    } catch (exc: Exception) {
+                        logger.error("error loading recently played: ${exc.message}")
+                    }
+                }
+                resultsSent = mediaSource.recentlyPlayedWhenReady { tracks ->
+                    if (tracks != null) {
+                        val children = tracks.map { track ->
+                            val metadata = MediaMetadataCompat.Builder().buildMeta(track, HOME_PREFIX + "recently_played")
+                            MediaItem(metadata.description, MediaItem.FLAG_PLAYABLE)
+                        }
+                        logger.info("Sending ${children.size} recently played tracks")
+                        result.sendResult(children)
+                    } else {
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
+                    }
+                }
+            }
+
+            // Recently Added - load recently added albums
+            parentMediaId == UAMP_RECENTLY_ADDED_ROOT -> {
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadRecentlyAdded()
+                    } catch (exc: Exception) {
+                        logger.error("error loading recently added: ${exc.message}")
+                    }
+                }
+                resultsSent = mediaSource.recentlyAddedWhenReady { albums ->
+                    if (albums != null) {
+                        val children = albums.map { album ->
+                            val metadata = MediaMetadataCompat.Builder().from(album).build()
+                            MediaItem(metadata.description, MediaItem.FLAG_BROWSABLE)
+                        }
+                        logger.info("Sending ${children.size} recently added albums")
+                        result.sendResult(children)
+                    } else {
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
+                    }
+                }
+            }
+
+            // All Music root - show alphabetical groupings
+            parentMediaId == UAMP_ALL_MUSIC_ROOT -> {
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadAllTracks()
+                    } catch (exc: Exception) {
+                        logger.error("error loading all tracks: ${exc.message}")
+                    }
+                }
+                resultsSent = mediaSource.allTracksWhenReady { tracks ->
+                    if (tracks != null) {
+                        // Group tracks by first letter
+                        val letterGroups = mutableMapOf<String, Int>()
+                        tracks.forEach { track ->
+                            val firstChar = track.title.firstOrNull()?.uppercaseChar() ?: '#'
+                            val letter = if (firstChar.isLetter()) firstChar.toString() else "#"
+                            letterGroups[letter] = (letterGroups[letter] ?: 0) + 1
+                        }
+
+                        // Create browsable items for each letter
+                        val children = letterGroups.keys.sorted().map { letter ->
+                            val count = letterGroups[letter] ?: 0
+                            val metadata = MediaMetadataCompat.Builder().apply {
+                                putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, "${UAMP_ALL_MUSIC_ROOT}/letter_$letter")
+                                putString(MediaMetadataCompat.METADATA_KEY_TITLE, letter)
+                                putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, "$count songs")
+                                putLong(MediaMetadataCompat.METADATA_KEY_BT_FOLDER_TYPE, MediaDescriptionCompat.BT_FOLDER_TYPE_TITLES.toLong())
+                            }.build()
+                            MediaItem(metadata.description, MediaItem.FLAG_BROWSABLE)
+                        }
+                        logger.info("Sending ${children.size} letter groups for All Music")
+                        result.sendResult(children)
+                    } else {
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
+                    }
+                }
+            }
+
+            // All Music letter filter - show tracks starting with specific letter
+            parentMediaId.startsWith("${UAMP_ALL_MUSIC_ROOT}/letter_") -> {
+                val letter = parentMediaId.removePrefix("${UAMP_ALL_MUSIC_ROOT}/letter_")
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadAllTracks()
+                    } catch (exc: Exception) {
+                        logger.error("error loading all tracks: ${exc.message}")
+                    }
+                }
+                resultsSent = mediaSource.allTracksWhenReady { tracks ->
+                    if (tracks != null) {
+                        val filteredTracks = tracks.filter { track ->
+                            val firstChar = track.title.firstOrNull()?.uppercaseChar() ?: '#'
+                            val trackLetter = if (firstChar.isLetter()) firstChar.toString() else "#"
+                            trackLetter == letter
+                        }.sortedBy { it.title }
+
+                        val children = filteredTracks.map { track ->
+                            val metadata = MediaMetadataCompat.Builder().buildMeta(track, "${UAMP_ALL_MUSIC_ROOT}/letter_$letter")
+                            MediaItem(metadata.description, MediaItem.FLAG_PLAYABLE)
+                        }
+                        logger.info("Sending ${children.size} tracks for letter $letter")
                         result.sendResult(children)
                     } else {
                         mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
@@ -578,13 +734,13 @@ class MyMusicService : MediaBrowserServiceCompat() {
             // Playlist handling (existing logic)
             else -> {
                 var playlistId = parentMediaId
-                var pageNum: Int? = null
+                var letterFilter: String? = null
                 val splitMediaId = parentMediaId.split('/')
                 if (splitMediaId.size == 2) {
                     playlistId = splitMediaId[0]
 
-                    if (splitMediaId[1].startsWith("page_")) {
-                        pageNum = splitMediaId[1].substring(5).toIntOrNull()
+                    if (splitMediaId[1].startsWith("letter_")) {
+                        letterFilter = splitMediaId[1].substring(7)
                     }
                 }
 
@@ -599,19 +755,35 @@ class MyMusicService : MediaBrowserServiceCompat() {
                     }
                 }
                 resultsSent = mediaSource.playlistWhenReady(playlistId) { plist ->
-                    if (plist != null && pageNum == null && plist.leafCount > PAGE_SIZE) {
-                        val numPages = ceil(plist.leafCount.toDouble() / PAGE_SIZE).toInt()
+                    if (plist != null && letterFilter == null && plist.leafCount > PAGE_SIZE) {
+                        // Group by first letter for large playlists
+                        val plistItems = plist.loadedItems()
+                        val letterGroups = mutableMapOf<String, Int>()
+
+                        plistItems.forEach { item ->
+                            if (item is Track) {
+                                val firstChar = item.title.firstOrNull()?.uppercaseChar() ?: '#'
+                                val letter = if (firstChar.isLetter()) firstChar.toString() else "#"
+                                letterGroups[letter] = (letterGroups[letter] ?: 0) + 1
+                            }
+                        }
+
                         val children = mutableListOf<MediaItem>()
-                        logger.info("Sending paginated playlist results: $numPages")
-                        for (i in 0 until numPages) {
-                            val start = (i * PAGE_SIZE) + 1
-                            val end = min(((i + 1) * PAGE_SIZE), plist.leafCount.toInt())
-                            val id = "${plist.ratingKey}/page_$i"
+                        // Sort letters alphabetically, with # at the end
+                        val sortedLetters = letterGroups.keys.sortedWith(compareBy {
+                            if (it == "#") "ZZZ" else it
+                        })
+
+                        logger.info("Sending alphabetical playlist groups: ${sortedLetters.size} letters")
+                        for (letter in sortedLetters) {
+                            val count = letterGroups[letter] ?: 0
+                            val id = "${plist.ratingKey}/letter_$letter"
 
                             children += MediaItem(
                                 MediaMetadataCompat.Builder()
                                     .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, id)
-                                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, "$start - $end")
+                                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, letter)
+                                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, "$count songs")
                                     .build().description,
                                 MediaItem.FLAG_BROWSABLE
                             )
@@ -620,17 +792,18 @@ class MyMusicService : MediaBrowserServiceCompat() {
                     } else if (plist != null) {
                         val children = mutableListOf<MediaItem>()
                         var plistItems = plist.loadedItems()
-                        if (pageNum != null) {
-                            val totalItems = plistItems.size
-                            val startIndex = pageNum * PAGE_SIZE
-                            val endExclusive = min((pageNum + 1) * PAGE_SIZE, totalItems)
 
-                            plistItems = if (startIndex >= totalItems) {
-                                emptyArray()
-                            } else {
-                                plistItems.sliceArray(IntRange(startIndex, endExclusive - 1))
-                            }
+                        if (letterFilter != null) {
+                            // Filter by letter
+                            plistItems = plistItems.filter { item ->
+                                if (item is Track) {
+                                    val firstChar = item.title.firstOrNull()?.uppercaseChar() ?: '#'
+                                    val itemLetter = if (firstChar.isLetter()) firstChar.toString() else "#"
+                                    itemLetter == letterFilter
+                                } else false
+                            }.toTypedArray()
                         }
+
                         plistItems.forEach { item ->
                             if (item !is Track) {
                                 return@forEach
@@ -974,6 +1147,125 @@ class MyMusicService : MediaBrowserServiceCompat() {
                         }
                     }
                 }
+            } else if (parentId.startsWith("${UAMP_ALL_MUSIC_ROOT}/letter_")) {
+                // All Music playback
+                val letter = parentId.removePrefix("${UAMP_ALL_MUSIC_ROOT}/letter_")
+                logger.info("Playing from All Music letter: $letter, track: $mediaId")
+
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadAllTracks()
+                    } catch (exc: Exception) {
+                        logger.error("Failed to load all tracks: ${exc.message}")
+                    }
+                }
+                mediaSource.allTracksWhenReady { tracks ->
+                    serviceScope.launch {
+                        if (tracks == null) {
+                            logger.error("Failed to load all tracks")
+                            return@launch
+                        }
+                        // Filter tracks by letter
+                        val filteredTracks = tracks.filter { track ->
+                            val firstChar = track.title.firstOrNull()?.uppercaseChar() ?: '#'
+                            val trackLetter = if (firstChar.isLetter()) firstChar.toString() else "#"
+                            trackLetter == letter
+                        }.sortedBy { it.title }
+
+                        val itemToPlay = filteredTracks.find { it.ratingKey.toString() == mediaId }
+                        if (itemToPlay == null) {
+                            logger.warn("Track not found in All Music letter $letter: $mediaId")
+                        } else {
+                            val playbackStartPositionMs = extras?.getLong(
+                                MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS,
+                                C.TIME_UNSET
+                            ) ?: C.TIME_UNSET
+
+                            preparePlaylist(
+                                buildHomePlaylist(filteredTracks, parentId),
+                                MediaMetadataCompat.Builder().buildMeta(itemToPlay, parentId),
+                                playWhenReady,
+                                playbackStartPositionMs
+                            )
+                        }
+                    }
+                }
+            } else if (parentId.startsWith(HOME_PREFIX)) {
+                // Home section playback (Recently Played, On Deck)
+                val homeSection = parentId.removePrefix(HOME_PREFIX)
+                logger.info("Playing from home section: $homeSection, track: $mediaId")
+
+                when (homeSection) {
+                    "recently_played" -> {
+                        serviceScope.launch {
+                            try {
+                                mediaSource.loadRecentlyPlayed()
+                            } catch (exc: Exception) {
+                                logger.error("Failed to load recently played: ${exc.message}")
+                            }
+                        }
+                        mediaSource.recentlyPlayedWhenReady { tracks ->
+                            serviceScope.launch {
+                                if (tracks == null) {
+                                    logger.error("Failed to load recently played tracks")
+                                    return@launch
+                                }
+                                val itemToPlay = tracks.find { it.ratingKey.toString() == mediaId }
+                                if (itemToPlay == null) {
+                                    logger.warn("Track not found in recently played: $mediaId")
+                                } else {
+                                    val playbackStartPositionMs = extras?.getLong(
+                                        MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS,
+                                        C.TIME_UNSET
+                                    ) ?: C.TIME_UNSET
+
+                                    preparePlaylist(
+                                        buildHomePlaylist(tracks, parentId),
+                                        MediaMetadataCompat.Builder().buildMeta(itemToPlay, parentId),
+                                        playWhenReady,
+                                        playbackStartPositionMs
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    "on_deck" -> {
+                        serviceScope.launch {
+                            try {
+                                mediaSource.loadOnDeck()
+                            } catch (exc: Exception) {
+                                logger.error("Failed to load on deck: ${exc.message}")
+                            }
+                        }
+                        mediaSource.onDeckWhenReady { tracks ->
+                            serviceScope.launch {
+                                if (tracks == null) {
+                                    logger.error("Failed to load on deck tracks")
+                                    return@launch
+                                }
+                                val itemToPlay = tracks.find { it.ratingKey.toString() == mediaId }
+                                if (itemToPlay == null) {
+                                    logger.warn("Track not found in on deck: $mediaId")
+                                } else {
+                                    val playbackStartPositionMs = extras?.getLong(
+                                        MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS,
+                                        C.TIME_UNSET
+                                    ) ?: C.TIME_UNSET
+
+                                    preparePlaylist(
+                                        buildHomePlaylist(tracks, parentId),
+                                        MediaMetadataCompat.Builder().buildMeta(itemToPlay, parentId),
+                                        playWhenReady,
+                                        playbackStartPositionMs
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    else -> {
+                        logger.warn("Unknown home section: $homeSection")
+                    }
+                }
             } else {
                 // Playlist-based playback (existing logic)
                 val playlistId = parentId
@@ -1063,6 +1355,22 @@ class MyMusicService : MediaBrowserServiceCompat() {
         ): List<MediaMetadataCompat> {
             return tracks.map { track ->
                 MediaMetadataCompat.Builder().fromAlbumTrack(track, albumId).build()
+            }
+        }
+
+        /**
+         * Builds a playlist from home section tracks (recently played, on deck).
+         *
+         * @param tracks List of tracks from a home section.
+         * @param sectionId The home section identifier (e.g., "home_recently_played").
+         * @return a [List] of [MediaMetadataCompat] objects representing the tracks.
+         */
+        private fun buildHomePlaylist(
+            tracks: List<Track>,
+            sectionId: String
+        ): List<MediaMetadataCompat> {
+            return tracks.map { track ->
+                MediaMetadataCompat.Builder().buildMeta(track, sectionId)
             }
         }
     }
