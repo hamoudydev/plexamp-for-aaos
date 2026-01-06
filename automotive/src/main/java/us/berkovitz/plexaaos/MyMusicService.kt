@@ -44,12 +44,18 @@ import us.berkovitz.plexaaos.extensions.flag
 import us.berkovitz.plexaaos.extensions.id
 import us.berkovitz.plexaaos.extensions.title
 import us.berkovitz.plexaaos.extensions.toMediaItem
+import us.berkovitz.plexaaos.library.ALBUM_PREFIX
+import us.berkovitz.plexaaos.library.ARTIST_PREFIX
 import us.berkovitz.plexaaos.library.BrowseTree
 import us.berkovitz.plexaaos.library.MusicSource
 import us.berkovitz.plexaaos.library.PlexSource
+import us.berkovitz.plexaaos.library.UAMP_ALBUMS_ROOT
+import us.berkovitz.plexaaos.library.UAMP_ARTISTS_ROOT
 import us.berkovitz.plexaaos.library.UAMP_BROWSABLE_ROOT
 import us.berkovitz.plexaaos.library.UAMP_PLAYLISTS_ROOT
 import us.berkovitz.plexaaos.library.buildMeta
+import us.berkovitz.plexaaos.library.from
+import us.berkovitz.plexaaos.library.fromAlbumTrack
 import us.berkovitz.plexapi.media.Track
 import us.berkovitz.plexapi.myplex.AuthorizationException
 import kotlin.math.ceil
@@ -438,104 +444,207 @@ class MyMusicService : MediaBrowserServiceCompat() {
         checkInit()
 
         var resultsSent = false
-        if (parentMediaId == UAMP_PLAYLISTS_ROOT || parentMediaId == UAMP_BROWSABLE_ROOT) {
-            if (parentMediaId == UAMP_BROWSABLE_ROOT) {
+
+        when {
+            // Root or Playlists root
+            parentMediaId == UAMP_BROWSABLE_ROOT || parentMediaId == UAMP_PLAYLISTS_ROOT -> {
+                if (parentMediaId == UAMP_BROWSABLE_ROOT) {
+                    serviceScope.launch {
+                        try {
+                            mediaSource.load()
+                        } catch (exc: AuthorizationException) {
+                            plexUtil.clearToken()
+                            requireLogin()
+                        } catch (exc: Exception) {
+                            logger.error("error occurred while loading media source: ${exc.message} ${exc.stackTraceToString()}")
+                        }
+                    }
+                }
+                resultsSent = mediaSource.whenReady { successfullyInitialized ->
+                    if (successfullyInitialized) {
+                        browseTree.refresh()
+                        val children = browseTree[parentMediaId]?.sortedBy { item -> item.title }?.map { item ->
+                            MediaItem(item.description, item.flag)
+                        } ?: listOf()
+                        logger.info("Sending ${children.size} results for $parentMediaId")
+                        result.sendResult(children)
+                    } else {
+                        logger.info("Failed to load results for $parentMediaId")
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
+                    }
+                }
+            }
+
+            // Artists root - load all artists
+            parentMediaId == UAMP_ARTISTS_ROOT -> {
                 serviceScope.launch {
                     try {
-                        mediaSource.load()
-                    } catch (exc: AuthorizationException){
+                        mediaSource.loadArtists()
+                    } catch (exc: Exception) {
+                        logger.error("error loading artists: ${exc.message}")
+                    }
+                }
+                resultsSent = mediaSource.artistsWhenReady { artists ->
+                    if (artists != null) {
+                        val children = artists.sortedBy { it.title }.map { artist ->
+                            val metadata = MediaMetadataCompat.Builder().from(artist).build()
+                            MediaItem(metadata.description, MediaItem.FLAG_BROWSABLE)
+                        }
+                        logger.info("Sending ${children.size} artists")
+                        result.sendResult(children)
+                    } else {
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
+                    }
+                }
+            }
+
+            // Albums root - load all albums
+            parentMediaId == UAMP_ALBUMS_ROOT -> {
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadAlbums()
+                    } catch (exc: Exception) {
+                        logger.error("error loading albums: ${exc.message}")
+                    }
+                }
+                resultsSent = mediaSource.albumsWhenReady { albums ->
+                    if (albums != null) {
+                        val children = albums.sortedBy { it.title }.map { album ->
+                            val metadata = MediaMetadataCompat.Builder().from(album).build()
+                            MediaItem(metadata.description, MediaItem.FLAG_BROWSABLE)
+                        }
+                        logger.info("Sending ${children.size} albums")
+                        result.sendResult(children)
+                    } else {
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
+                    }
+                }
+            }
+
+            // Artist detail - load albums for this artist
+            parentMediaId.startsWith(ARTIST_PREFIX) -> {
+                val artistId = parentMediaId.removePrefix(ARTIST_PREFIX)
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadArtistAlbums(artistId)
+                    } catch (exc: Exception) {
+                        logger.error("error loading artist albums: ${exc.message}")
+                    }
+                }
+                resultsSent = mediaSource.artistAlbumsWhenReady(artistId) { albums ->
+                    if (albums != null) {
+                        val children = albums.sortedBy { it.title }.map { album ->
+                            val metadata = MediaMetadataCompat.Builder().from(album).build()
+                            MediaItem(metadata.description, MediaItem.FLAG_BROWSABLE)
+                        }
+                        logger.info("Sending ${children.size} albums for artist $artistId")
+                        result.sendResult(children)
+                    } else {
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
+                    }
+                }
+            }
+
+            // Album detail - load tracks for this album
+            parentMediaId.startsWith(ALBUM_PREFIX) && !parentMediaId.contains("/") -> {
+                val albumId = parentMediaId.removePrefix(ALBUM_PREFIX)
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadAlbumTracks(albumId)
+                    } catch (exc: Exception) {
+                        logger.error("error loading album tracks: ${exc.message}")
+                    }
+                }
+                resultsSent = mediaSource.albumTracksWhenReady(albumId) { tracks ->
+                    if (tracks != null) {
+                        val children = tracks.map { track ->
+                            val metadata = MediaMetadataCompat.Builder().fromAlbumTrack(track, albumId).build()
+                            MediaItem(metadata.description, MediaItem.FLAG_PLAYABLE)
+                        }
+                        logger.info("Sending ${children.size} tracks for album $albumId")
+                        result.sendResult(children)
+                    } else {
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
+                    }
+                }
+            }
+
+            // Playlist handling (existing logic)
+            else -> {
+                var playlistId = parentMediaId
+                var pageNum: Int? = null
+                val splitMediaId = parentMediaId.split('/')
+                if (splitMediaId.size == 2) {
+                    playlistId = splitMediaId[0]
+
+                    if (splitMediaId[1].startsWith("page_")) {
+                        pageNum = splitMediaId[1].substring(5).toIntOrNull()
+                    }
+                }
+
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadPlaylist(playlistId)
+                    } catch (exc: AuthorizationException) {
                         plexUtil.clearToken()
                         requireLogin()
                     } catch (exc: Exception) {
-                        logger.error("error occurred while loading media source: ${exc.message} ${exc.stackTraceToString()}")
+                        logger.error("error occurred while loading playlist ${playlistId}: ${exc.message} ${exc.stackTraceToString()}")
                     }
                 }
-            }
-            // If the media source is ready, the results will be set synchronously here.
-            resultsSent = mediaSource.whenReady { successfullyInitialized ->
-                if (successfullyInitialized) {
-                    browseTree.refresh()
-                    val children = browseTree[parentMediaId]?.sortedBy { item -> item.title }?.map { item ->
-                        MediaItem(item.description, item.flag)
-                    } ?: listOf()
-                    logger.info("Sending ${children.size} results for $parentMediaId")
-                    result.sendResult(children)
-                } else {
-                    logger.info("Failed to load results for $parentMediaId")
-                    mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
-                    result.sendResult(null)
-                }
-            }
-        } else {
-            var playlistId = parentMediaId
-            var pageNum: Int? = null
-            val splitMediaId = parentMediaId.split('/')
-            if (splitMediaId.size == 2) {
-                playlistId = splitMediaId[0]
+                resultsSent = mediaSource.playlistWhenReady(playlistId) { plist ->
+                    if (plist != null && pageNum == null && plist.leafCount > PAGE_SIZE) {
+                        val numPages = ceil(plist.leafCount.toDouble() / PAGE_SIZE).toInt()
+                        val children = mutableListOf<MediaItem>()
+                        logger.info("Sending paginated playlist results: $numPages")
+                        for (i in 0 until numPages) {
+                            val start = (i * PAGE_SIZE) + 1
+                            val end = min(((i + 1) * PAGE_SIZE), plist.leafCount.toInt())
+                            val id = "${plist.ratingKey}/page_$i"
 
-                if (splitMediaId[1].startsWith("page_")) {
-                    pageNum = splitMediaId[1].substring(5).toIntOrNull()
-                }
-            }
-
-
-            serviceScope.launch {
-                try {
-                    mediaSource.loadPlaylist(playlistId)
-                } catch (exc: AuthorizationException){
-                    plexUtil.clearToken()
-                    requireLogin()
-                } catch (exc: Exception) {
-                    logger.error("error occurred while loading playlist ${playlistId}: ${exc.message} ${exc.stackTraceToString()}")
-                }
-            }
-            resultsSent = mediaSource.playlistWhenReady(playlistId) { plist ->
-                if (plist != null && pageNum == null && plist.leafCount > PAGE_SIZE) {
-                    val numPages = ceil(plist.leafCount.toDouble() / PAGE_SIZE).toInt()
-                    val children = mutableListOf<MediaItem>()
-                    logger.info("Sending paginated playlist results: $numPages")
-                    for (i in 0 until numPages) {
-                        val start = (i * PAGE_SIZE) + 1
-                        val end = min(((i + 1) * PAGE_SIZE), plist.leafCount.toInt())
-                        val id = "${plist.ratingKey}/page_$i"
-
-                        children += MediaItem(
-                            MediaMetadataCompat.Builder()
-                                .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, id)
-                                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, "$start - $end")
-                                .build().description,
-                            MediaItem.FLAG_BROWSABLE
-                        )
-                    }
-                    result.sendResult(children)
-                } else if (plist != null) {
-                    val children = mutableListOf<MediaItem>()
-                    var plistItems = plist.loadedItems()
-                    if (pageNum != null) {
-                        val totalItems = plistItems.size
-                        val startIndex = pageNum * PAGE_SIZE
-                        val endExclusive = min((pageNum + 1) * PAGE_SIZE, totalItems)
-
-                        plistItems = if (startIndex >= totalItems) {
-                            emptyArray()
-                        } else {
-                            plistItems.sliceArray(IntRange(startIndex, endExclusive - 1))
+                            children += MediaItem(
+                                MediaMetadataCompat.Builder()
+                                    .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, id)
+                                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, "$start - $end")
+                                    .build().description,
+                                MediaItem.FLAG_BROWSABLE
+                            )
                         }
-                    }
-                    plistItems.forEach { item ->
-                        if (item !is Track) {
-                            return@forEach
+                        result.sendResult(children)
+                    } else if (plist != null) {
+                        val children = mutableListOf<MediaItem>()
+                        var plistItems = plist.loadedItems()
+                        if (pageNum != null) {
+                            val totalItems = plistItems.size
+                            val startIndex = pageNum * PAGE_SIZE
+                            val endExclusive = min((pageNum + 1) * PAGE_SIZE, totalItems)
+
+                            plistItems = if (startIndex >= totalItems) {
+                                emptyArray()
+                            } else {
+                                plistItems.sliceArray(IntRange(startIndex, endExclusive - 1))
+                            }
                         }
-                        children += MediaItem(
-                            (MediaMetadataCompat.Builder().buildMeta(item, playlistId)).description,
-                            MediaItem.FLAG_PLAYABLE
-                        )
+                        plistItems.forEach { item ->
+                            if (item !is Track) {
+                                return@forEach
+                            }
+                            children += MediaItem(
+                                (MediaMetadataCompat.Builder().buildMeta(item, playlistId)).description,
+                                MediaItem.FLAG_PLAYABLE
+                            )
+                        }
+                        logger.info("Sending playlist results: ${children.size}")
+                        result.sendResult(children)
+                    } else {
+                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
+                        result.sendResult(null)
                     }
-                    logger.info("Sending playlist results: ${children.size}")
-                    result.sendResult(children)
-                } else {
-                    mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
-                    result.sendResult(null)
                 }
             }
         }
@@ -543,9 +652,6 @@ class MyMusicService : MediaBrowserServiceCompat() {
         // If the results are not ready, the service must "detach" the results before
         // the method returns. After the source is ready, the lambda above will run,
         // and the caller will be notified that the results are ready.
-        //
-        // See [MediaItemFragmentViewModel.subscriptionCallback] for how this is passed to the
-        // UI/displayed in the [RecyclerView].
         if (!resultsSent) {
             result.detach()
         }
@@ -818,60 +924,98 @@ class MyMusicService : MediaBrowserServiceCompat() {
             playWhenReady: Boolean,
             extras: Bundle?
         ) {
-            logger.error("onPrepareFromMediaId: $prepareId, $playWhenReady")
+            logger.info("onPrepareFromMediaId: $prepareId, $playWhenReady")
             val idSplit = prepareId.split('/')
             if (idSplit.size != 2) {
                 logger.error("media id doesn't include parent id: $prepareId")
                 return
             }
 
-            val playlistId = idSplit[0]
+            val parentId = idSplit[0]
             val mediaId = idSplit[1]
 
-            serviceScope.launch {
-                //logger.info("load playlist starting")
-                try {
-                    mediaSource.loadPlaylist(playlistId)
-                } catch (exc: Exception) {
-                    logger.error("Failed to find playlist: $playlistId: ${exc.message}, ${exc.printStackTrace()}")
-                }
-                //logger.info("load playlist complete")
-            }
-
-            mediaSource.playlistWhenReady(playlistId) { plist ->
-                //logger.info("playlist when ready")
+            // Check if this is an album track (starts with album_ prefix)
+            if (parentId.startsWith(ALBUM_PREFIX)) {
+                val albumId = parentId.removePrefix(ALBUM_PREFIX)
                 serviceScope.launch {
-                    //logger.info("playlist when ready scope")
-                    val currPlaylist = plist?.items()
-                    if (currPlaylist == null) {
-                        logger.error("Failed to load playlist: $playlistId")
-                        return@launch
+                    try {
+                        mediaSource.loadAlbumTracks(albumId)
+                    } catch (exc: Exception) {
+                        logger.error("Failed to load album tracks: $albumId: ${exc.message}")
                     }
+                }
 
-                    val itemToPlay = currPlaylist.find { item ->
-                        if (item !is Track) {
-                            logger.warn("Skipping unknown playlist item: $item")
-                            return@find false
+                mediaSource.albumTracksWhenReady(albumId) { tracks ->
+                    serviceScope.launch {
+                        if (tracks == null) {
+                            logger.error("Failed to load album tracks: $albumId")
+                            return@launch
                         }
-                        item.ratingKey.toString() == mediaId
-                    }
-                    if (itemToPlay == null) {
-                        logger.warn("Content not found: MediaID=$mediaId")
-                        // TODO: Notify caller of the error.
-                    } else {
-                        val playbackStartPositionMs =
-                            extras?.getLong(
-                                MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS,
-                                C.TIME_UNSET
-                            )
-                                ?: C.TIME_UNSET
 
-                        preparePlaylist(
-                            buildPlaylist(currPlaylist, playlistId),
-                            MediaMetadataCompat.Builder().buildMeta(itemToPlay, playlistId),
-                            playWhenReady,
-                            playbackStartPositionMs
-                        )
+                        val itemToPlay = tracks.find { track ->
+                            track.ratingKey.toString() == mediaId
+                        }
+                        if (itemToPlay == null) {
+                            logger.warn("Track not found in album: MediaID=$mediaId")
+                        } else {
+                            val playbackStartPositionMs =
+                                extras?.getLong(
+                                    MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS,
+                                    C.TIME_UNSET
+                                ) ?: C.TIME_UNSET
+
+                            preparePlaylist(
+                                buildAlbumPlaylist(tracks, albumId),
+                                MediaMetadataCompat.Builder().fromAlbumTrack(itemToPlay, albumId).build(),
+                                playWhenReady,
+                                playbackStartPositionMs
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Playlist-based playback (existing logic)
+                val playlistId = parentId
+
+                serviceScope.launch {
+                    try {
+                        mediaSource.loadPlaylist(playlistId)
+                    } catch (exc: Exception) {
+                        logger.error("Failed to find playlist: $playlistId: ${exc.message}, ${exc.printStackTrace()}")
+                    }
+                }
+
+                mediaSource.playlistWhenReady(playlistId) { plist ->
+                    serviceScope.launch {
+                        val currPlaylist = plist?.items()
+                        if (currPlaylist == null) {
+                            logger.error("Failed to load playlist: $playlistId")
+                            return@launch
+                        }
+
+                        val itemToPlay = currPlaylist.find { item ->
+                            if (item !is Track) {
+                                logger.warn("Skipping unknown playlist item: $item")
+                                return@find false
+                            }
+                            item.ratingKey.toString() == mediaId
+                        }
+                        if (itemToPlay == null) {
+                            logger.warn("Content not found: MediaID=$mediaId")
+                        } else {
+                            val playbackStartPositionMs =
+                                extras?.getLong(
+                                    MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS,
+                                    C.TIME_UNSET
+                                ) ?: C.TIME_UNSET
+
+                            preparePlaylist(
+                                buildPlaylist(currPlaylist, playlistId),
+                                MediaMetadataCompat.Builder().buildMeta(itemToPlay, playlistId),
+                                playWhenReady,
+                                playbackStartPositionMs
+                            )
+                        }
                     }
                 }
             }
@@ -895,8 +1039,6 @@ class MyMusicService : MediaBrowserServiceCompat() {
         /**
          * Builds a playlist based on a [MediaMetadataCompat].
          *
-         * TODO: Support building a playlist by artist, genre, etc...
-         *
          * @param item Item to base the playlist on.
          * @return a [List] of [MediaMetadataCompat] objects representing a playlist.
          */
@@ -905,6 +1047,22 @@ class MyMusicService : MediaBrowserServiceCompat() {
             playlistId: String
         ): List<MediaMetadataCompat> {
             return playlist.map { MediaMetadataCompat.Builder().buildMeta(it, playlistId) }
+        }
+
+        /**
+         * Builds a playlist from album tracks.
+         *
+         * @param tracks List of tracks from an album.
+         * @param albumId The album's rating key.
+         * @return a [List] of [MediaMetadataCompat] objects representing the album tracks.
+         */
+        private fun buildAlbumPlaylist(
+            tracks: List<Track>,
+            albumId: String
+        ): List<MediaMetadataCompat> {
+            return tracks.map { track ->
+                MediaMetadataCompat.Builder().fromAlbumTrack(track, albumId).build()
+            }
         }
     }
 

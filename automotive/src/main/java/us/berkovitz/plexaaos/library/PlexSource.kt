@@ -9,10 +9,13 @@ import kotlinx.coroutines.withContext
 import us.berkovitz.plexaaos.AndroidStorage
 import us.berkovitz.plexaaos.PlexLoggerFactory
 import us.berkovitz.plexaaos.PlexUtil
+import us.berkovitz.plexapi.media.Album
+import us.berkovitz.plexapi.media.Artist
 import us.berkovitz.plexapi.media.MediaItem
 import us.berkovitz.plexapi.media.Playlist
 import us.berkovitz.plexapi.media.PlaylistType
 import us.berkovitz.plexapi.media.PlexServer
+import us.berkovitz.plexapi.media.Track
 import us.berkovitz.plexapi.myplex.MyPlexAccount
 import kotlin.coroutines.coroutineContext
 
@@ -28,6 +31,13 @@ class PlexSource(
     private var catalog: MutableMap<String, Playlist> = hashMapOf()
     private val plexAccount = MyPlexAccount(plexToken)
     private var plexServer: PlexServer? = null
+
+    // New caches for artists and albums
+    private var musicSectionId: String? = null
+    private var artistsCache: List<Artist> = emptyList()
+    private var albumsCache: List<Album> = emptyList()
+    private var artistAlbumsCache: MutableMap<String, List<Album>> = hashMapOf()
+    private var albumTracksCache: MutableMap<String, List<Track>> = hashMapOf()
 
     init {
         state = STATE_INITIALIZING
@@ -114,6 +124,19 @@ class PlexSource(
                 return@withContext STATE_ERROR
             }
 
+            // Find music library section
+            try {
+                val musicSection = plexServer!!.musicSection()
+                if (musicSection != null) {
+                    musicSectionId = musicSection.key
+                    logger.info("Found music section: ${musicSection.title} (id: ${musicSection.key})")
+                } else {
+                    logger.warn("No music library section found")
+                }
+            } catch (e: Exception) {
+                logger.error("Error finding music section: ${e.message}")
+            }
+
             val playlists = plexServer!!.playlists(PlaylistType.AUDIO)
             playlists.forEach {
                 if (!catalog.containsKey(it.ratingKey.toString()))
@@ -165,4 +188,118 @@ class PlexSource(
             }
         }
     }
+
+    // New methods for artists and albums browsing
+
+    override fun getMusicSectionId(): String? = musicSectionId
+
+    override suspend fun loadArtists(): List<Artist> {
+        return withContext(Dispatchers.IO) {
+            findServer()
+            if (plexServer == null || musicSectionId == null) {
+                logger.warn("Cannot load artists: server or music section not available")
+                return@withContext emptyList()
+            }
+
+            try {
+                setArtistsState(STATE_INITIALIZING, null)
+                val artists = plexServer!!.artists(musicSectionId!!)
+                artistsCache = artists
+                setArtistsState(STATE_INITIALIZED, artists)
+                logger.info("Loaded ${artists.size} artists")
+                return@withContext artists
+            } catch (e: Exception) {
+                logger.error("Error loading artists: ${e.message}")
+                setArtistsState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+        }
+    }
+
+    override suspend fun loadAlbums(): List<Album> {
+        return withContext(Dispatchers.IO) {
+            findServer()
+            if (plexServer == null || musicSectionId == null) {
+                logger.warn("Cannot load albums: server or music section not available")
+                return@withContext emptyList()
+            }
+
+            try {
+                setAlbumsState(STATE_INITIALIZING, null)
+                val albums = plexServer!!.albums(musicSectionId!!)
+                albumsCache = albums
+                setAlbumsState(STATE_INITIALIZED, albums)
+                logger.info("Loaded ${albums.size} albums")
+                return@withContext albums
+            } catch (e: Exception) {
+                logger.error("Error loading albums: ${e.message}")
+                setAlbumsState(STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+        }
+    }
+
+    override suspend fun loadArtistAlbums(artistId: String): List<Album> {
+        return withContext(Dispatchers.IO) {
+            findServer()
+            if (plexServer == null) {
+                logger.warn("Cannot load artist albums: server not available")
+                return@withContext emptyList()
+            }
+
+            try {
+                setArtistAlbumsState(artistId, STATE_INITIALIZING, null)
+                val artistRatingKey = artistId.toLongOrNull()
+                if (artistRatingKey == null) {
+                    logger.warn("Invalid artist id: $artistId")
+                    setArtistAlbumsState(artistId, STATE_ERROR, null)
+                    return@withContext emptyList()
+                }
+
+                val albums = plexServer!!.artistAlbums(artistRatingKey)
+                artistAlbumsCache[artistId] = albums
+                setArtistAlbumsState(artistId, STATE_INITIALIZED, albums)
+                logger.info("Loaded ${albums.size} albums for artist $artistId")
+                return@withContext albums
+            } catch (e: Exception) {
+                logger.error("Error loading artist albums: ${e.message}")
+                setArtistAlbumsState(artistId, STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+        }
+    }
+
+    override suspend fun loadAlbumTracks(albumId: String): List<Track> {
+        return withContext(Dispatchers.IO) {
+            findServer()
+            if (plexServer == null) {
+                logger.warn("Cannot load album tracks: server not available")
+                return@withContext emptyList()
+            }
+
+            try {
+                setAlbumTracksState(albumId, STATE_INITIALIZING, null)
+                val albumRatingKey = albumId.toLongOrNull()
+                if (albumRatingKey == null) {
+                    logger.warn("Invalid album id: $albumId")
+                    setAlbumTracksState(albumId, STATE_ERROR, null)
+                    return@withContext emptyList()
+                }
+
+                val tracks = plexServer!!.albumTracks(albumRatingKey)
+                albumTracksCache[albumId] = tracks
+                setAlbumTracksState(albumId, STATE_INITIALIZED, tracks)
+                logger.info("Loaded ${tracks.size} tracks for album $albumId")
+                return@withContext tracks
+            } catch (e: Exception) {
+                logger.error("Error loading album tracks: ${e.message}")
+                setAlbumTracksState(albumId, STATE_ERROR, null)
+                return@withContext emptyList()
+            }
+        }
+    }
+
+    override fun getArtists(): List<Artist> = artistsCache
+
+    override fun getAlbums(): List<Album> = albumsCache
 }

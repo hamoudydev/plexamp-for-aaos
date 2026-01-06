@@ -7,7 +7,7 @@ plugins {
 }
 
 repositories {
-    mavenLocal()
+    mavenLocal() // Use local build of kotlin-plexapi during development
     maven {
         url = uri("https://maven.pkg.github.com/joeyberkovitz/kotlin-plexapi")
         credentials {
@@ -100,7 +100,7 @@ dependencies {
     debugImplementation "androidx.compose.ui:ui-test-manifest:$compose_ui_version"
 
     implementation 'androidx.media:media:1.6.0'
-    implementation 'us.berkovitz:kotlin-plexapi:0.1.17'
+    implementation 'us.berkovitz:kotlin-plexapi:0.2.0'
 
     api "com.google.android.exoplayer:exoplayer-core:$exoplayer_version"
     api "com.google.android.exoplayer:exoplayer-ui:$exoplayer_version"

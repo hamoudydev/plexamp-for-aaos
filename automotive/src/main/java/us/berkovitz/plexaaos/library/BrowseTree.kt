@@ -23,6 +23,8 @@ import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
 import us.berkovitz.plexaaos.R
 import us.berkovitz.plexaaos.extensions.*
+import us.berkovitz.plexapi.media.Album
+import us.berkovitz.plexapi.media.Artist
 import us.berkovitz.plexapi.media.Playlist
 import us.berkovitz.plexapi.media.Track
 
@@ -84,7 +86,25 @@ class BrowseTree(
             flag = MediaItem.FLAG_BROWSABLE
         }.build()
 
+        val artistsMetadata = MediaMetadataCompat.Builder().apply {
+            id = UAMP_ARTISTS_ROOT
+            title = context.getString(R.string.artists_title)
+            albumArtUri = RESOURCE_ROOT_URI +
+                    context.resources.getResourceEntryName(R.drawable.baseline_person_24)
+            flag = MediaItem.FLAG_BROWSABLE
+        }.build()
+
+        val albumsMetadata = MediaMetadataCompat.Builder().apply {
+            id = UAMP_ALBUMS_ROOT
+            title = context.getString(R.string.albums_title)
+            albumArtUri = RESOURCE_ROOT_URI +
+                    context.resources.getResourceEntryName(R.drawable.baseline_album_24)
+            flag = MediaItem.FLAG_BROWSABLE
+        }.build()
+
         rootList += playlistsMetadata
+        rootList += artistsMetadata
+        rootList += albumsMetadata
         mediaIdToChildren[UAMP_BROWSABLE_ROOT] = rootList
         refresh()
     }
@@ -227,10 +247,108 @@ fun MediaMetadataCompat.Builder.buildMeta(
     }
 }
 
+/**
+ * Extension function to build metadata from an Artist.
+ */
+fun MediaMetadataCompat.Builder.from(artist: Artist): MediaMetadataCompat.Builder {
+    id = ARTIST_PREFIX + artist.ratingKey.toString()
+    title = artist.title
+    flag = MediaItem.FLAG_BROWSABLE
+
+    var iconUrl = artist.thumb ?: artist.art
+    if (iconUrl != null && artist._server != null) {
+        iconUrl = artist._server!!.urlFor(iconUrl)
+        iconUrl = AlbumArtContentProvider.mapUri(Uri.parse(iconUrl)).toString()
+    }
+
+    displayIconUri = iconUrl
+    albumArtUri = iconUrl
+    displayTitle = artist.title
+
+    downloadStatus = MediaDescriptionCompat.STATUS_NOT_DOWNLOADED
+
+    return this
+}
+
+/**
+ * Extension function to build metadata from an Album.
+ */
+fun MediaMetadataCompat.Builder.from(album: Album): MediaMetadataCompat.Builder {
+    id = ALBUM_PREFIX + album.ratingKey.toString()
+    title = album.title
+    flag = MediaItem.FLAG_BROWSABLE
+
+    var iconUrl = album.thumb ?: album.art ?: album.parentThumb
+    if (iconUrl != null && album._server != null) {
+        iconUrl = album._server!!.urlFor(iconUrl)
+        iconUrl = AlbumArtContentProvider.mapUri(Uri.parse(iconUrl)).toString()
+    }
+
+    displayIconUri = iconUrl
+    albumArtUri = iconUrl
+    displayTitle = album.title
+    displaySubtitle = album.parentTitle // Artist name
+    if (album.year != null) {
+        displayDescription = album.year.toString()
+    }
+
+    artist = album.parentTitle
+    this.album = album.title
+    trackCount = album.leafCount.toLong()
+
+    downloadStatus = MediaDescriptionCompat.STATUS_NOT_DOWNLOADED
+
+    return this
+}
+
+/**
+ * Extension function to build metadata for a Track from an album context.
+ */
+fun MediaMetadataCompat.Builder.fromAlbumTrack(
+    track: Track,
+    albumId: String
+): MediaMetadataCompat.Builder {
+    id = "${ALBUM_PREFIX}${albumId}/${track.ratingKey}"
+    title = track.title
+    mediaUri = track.getStreamUrl()
+    flag = MediaItem.FLAG_PLAYABLE
+    trackCount = 1
+    duration = track.duration
+
+    var iconUrl = track.thumb ?: track.parentThumb ?: track.grandparentThumb
+    if (iconUrl != null && track._server != null) {
+        iconUrl = track._server!!.urlFor(iconUrl)
+        iconUrl = AlbumArtContentProvider.mapUri(Uri.parse(iconUrl)).toString()
+    }
+
+    var artistName = track.grandparentTitle
+    if (!track.originalTitle.isNullOrEmpty()) {
+        artistName = track.originalTitle
+    }
+
+    displayIconUri = iconUrl
+    albumArtUri = iconUrl
+    displayTitle = track.title
+    displaySubtitle = artistName
+    displayDescription = track.parentTitle
+
+    artist = artistName
+    this.album = track.parentTitle
+
+    downloadStatus = MediaDescriptionCompat.STATUS_NOT_DOWNLOADED
+
+    return this
+}
 
 private const val TAG = "BrowseTree"
 const val UAMP_BROWSABLE_ROOT = "/"
 const val UAMP_EMPTY_ROOT = "@empty@"
 const val UAMP_PLAYLISTS_ROOT = "__PLAYLISTS__"
+const val UAMP_ARTISTS_ROOT = "__ARTISTS__"
+const val UAMP_ALBUMS_ROOT = "__ALBUMS__"
+
+// Prefixes for media IDs
+const val ARTIST_PREFIX = "artist_"
+const val ALBUM_PREFIX = "album_"
 
 const val RESOURCE_ROOT_URI = "android.resource://us.berkovitz.plexaaos/drawable/"

@@ -19,8 +19,11 @@ package us.berkovitz.plexaaos.library
 import android.os.Bundle
 import android.support.v4.media.MediaMetadataCompat
 import androidx.annotation.IntDef
+import us.berkovitz.plexapi.media.Album
+import us.berkovitz.plexapi.media.Artist
 import us.berkovitz.plexapi.media.MediaItem
 import us.berkovitz.plexapi.media.Playlist
+import us.berkovitz.plexapi.media.Track
 
 /**
  * Interface used by [MusicService] for looking up [MediaMetadataCompat] objects.
@@ -54,6 +57,63 @@ interface MusicSource : Iterable<Playlist> {
     fun playlistWhenReady(playlistId: String, performAction: (Playlist?) -> Unit): Boolean
 
     fun search(query: String, extras: Bundle): List<MediaMetadataCompat>
+
+    // New methods for artists and albums browsing
+
+    /**
+     * Get the music library section ID.
+     */
+    fun getMusicSectionId(): String?
+
+    /**
+     * Load all artists from the music library.
+     */
+    suspend fun loadArtists(): List<Artist>
+
+    /**
+     * Load all albums from the music library.
+     */
+    suspend fun loadAlbums(): List<Album>
+
+    /**
+     * Load albums for a specific artist.
+     */
+    suspend fun loadArtistAlbums(artistId: String): List<Album>
+
+    /**
+     * Load tracks for a specific album.
+     */
+    suspend fun loadAlbumTracks(albumId: String): List<Track>
+
+    /**
+     * Get cached artists.
+     */
+    fun getArtists(): List<Artist>
+
+    /**
+     * Get cached albums.
+     */
+    fun getAlbums(): List<Album>
+
+    /**
+     * Callback when artists are ready.
+     */
+    fun artistsWhenReady(performAction: (List<Artist>?) -> Unit): Boolean
+
+    /**
+     * Callback when albums are ready.
+     */
+    fun albumsWhenReady(performAction: (List<Album>?) -> Unit): Boolean
+
+    /**
+     * Callback when artist's albums are ready.
+     */
+    fun artistAlbumsWhenReady(artistId: String, performAction: (List<Album>?) -> Unit): Boolean
+
+    /**
+     * Callback when album's tracks are ready.
+     */
+    fun albumTracksWhenReady(albumId: String, performAction: (List<Track>?) -> Unit): Boolean
 }
 
 @IntDef(
@@ -178,6 +238,129 @@ abstract class AbstractMusicSource : MusicSource {
     override fun search(query: String, extras: Bundle): List<MediaMetadataCompat> {
         return emptyList()
     }
+
+    // State management for artists and albums
+    @State
+    protected var artistsState: Int = STATE_CREATED
+    @State
+    protected var albumsState: Int = STATE_CREATED
+    private val artistAlbumsState: MutableMap<String, Int> = hashMapOf()
+    private val albumTracksState: MutableMap<String, Int> = hashMapOf()
+
+    private val artistsReadyListeners = mutableListOf<(List<Artist>?) -> Unit>()
+    private val albumsReadyListeners = mutableListOf<(List<Album>?) -> Unit>()
+    private val artistAlbumsReadyListeners = mutableMapOf<String, MutableList<(List<Album>?) -> Unit>>()
+    private val albumTracksReadyListeners = mutableMapOf<String, MutableList<(List<Track>?) -> Unit>>()
+
+    protected fun setArtistsState(state: Int, artists: List<Artist>?) {
+        synchronized(artistsReadyListeners) {
+            artistsState = state
+            if (state == STATE_INITIALIZED || state == STATE_ERROR) {
+                artistsReadyListeners.forEach { it(artists) }
+                artistsReadyListeners.clear()
+            }
+        }
+    }
+
+    protected fun setAlbumsState(state: Int, albums: List<Album>?) {
+        synchronized(albumsReadyListeners) {
+            albumsState = state
+            if (state == STATE_INITIALIZED || state == STATE_ERROR) {
+                albumsReadyListeners.forEach { it(albums) }
+                albumsReadyListeners.clear()
+            }
+        }
+    }
+
+    protected fun setArtistAlbumsState(artistId: String, state: Int, albums: List<Album>?) {
+        synchronized(artistAlbumsState) {
+            artistAlbumsState[artistId] = state
+            if (state == STATE_INITIALIZED || state == STATE_ERROR) {
+                synchronized(artistAlbumsReadyListeners) {
+                    artistAlbumsReadyListeners[artistId]?.forEach { it(albums) }
+                    artistAlbumsReadyListeners[artistId]?.clear()
+                }
+            }
+        }
+    }
+
+    protected fun setAlbumTracksState(albumId: String, state: Int, tracks: List<Track>?) {
+        synchronized(albumTracksState) {
+            albumTracksState[albumId] = state
+            if (state == STATE_INITIALIZED || state == STATE_ERROR) {
+                synchronized(albumTracksReadyListeners) {
+                    albumTracksReadyListeners[albumId]?.forEach { it(tracks) }
+                    albumTracksReadyListeners[albumId]?.clear()
+                }
+            }
+        }
+    }
+
+    override fun artistsWhenReady(performAction: (List<Artist>?) -> Unit): Boolean =
+        synchronized(artistsReadyListeners) {
+            when (artistsState) {
+                STATE_CREATED, STATE_INITIALIZING -> {
+                    artistsReadyListeners += performAction
+                    false
+                }
+                else -> {
+                    performAction(getArtists())
+                    true
+                }
+            }
+        }
+
+    override fun albumsWhenReady(performAction: (List<Album>?) -> Unit): Boolean =
+        synchronized(albumsReadyListeners) {
+            when (albumsState) {
+                STATE_CREATED, STATE_INITIALIZING -> {
+                    albumsReadyListeners += performAction
+                    false
+                }
+                else -> {
+                    performAction(getAlbums())
+                    true
+                }
+            }
+        }
+
+    override fun artistAlbumsWhenReady(artistId: String, performAction: (List<Album>?) -> Unit): Boolean =
+        synchronized(artistAlbumsState) {
+            when (artistAlbumsState[artistId]) {
+                null, STATE_CREATED, STATE_INITIALIZING -> {
+                    synchronized(artistAlbumsReadyListeners) {
+                        if (artistAlbumsReadyListeners[artistId] == null) {
+                            artistAlbumsReadyListeners[artistId] = mutableListOf()
+                        }
+                        artistAlbumsReadyListeners[artistId]!! += performAction
+                        false
+                    }
+                }
+                else -> {
+                    performAction(null) // Will be loaded fresh
+                    true
+                }
+            }
+        }
+
+    override fun albumTracksWhenReady(albumId: String, performAction: (List<Track>?) -> Unit): Boolean =
+        synchronized(albumTracksState) {
+            when (albumTracksState[albumId]) {
+                null, STATE_CREATED, STATE_INITIALIZING -> {
+                    synchronized(albumTracksReadyListeners) {
+                        if (albumTracksReadyListeners[albumId] == null) {
+                            albumTracksReadyListeners[albumId] = mutableListOf()
+                        }
+                        albumTracksReadyListeners[albumId]!! += performAction
+                        false
+                    }
+                }
+                else -> {
+                    performAction(null) // Will be loaded fresh
+                    true
+                }
+            }
+        }
 }
 
 private const val TAG = "MusicSource"
