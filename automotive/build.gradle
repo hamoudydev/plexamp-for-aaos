@@ -25,11 +25,14 @@ android {
     signingConfigs {
         Properties properties = new Properties()
         properties.load(project.rootProject.file('local.properties').newDataInputStream())
-        release {
-            storeFile file(properties.getProperty("signing_key_path"))
-            storePassword properties.getProperty("signing_key_password")
-            keyAlias properties.getProperty("signing_key_alias")
-            keyPassword properties.getProperty("signing_key_password")
+        def signingKeyPath = properties.getProperty("signing_key_path")
+        if (signingKeyPath != null) {
+            release {
+                storeFile file(signingKeyPath)
+                storePassword properties.getProperty("signing_key_password")
+                keyAlias properties.getProperty("signing_key_alias")
+                keyPassword properties.getProperty("signing_key_password")
+            }
         }
     }
     namespace 'us.berkovitz.plexaaos'
@@ -50,7 +53,6 @@ android {
         vectorDrawables {
             useSupportLibrary true
         }
-        signingConfig signingConfigs.release
     }
 
     buildTypes {

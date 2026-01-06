@@ -96,6 +96,11 @@ interface MusicSource : Iterable<Playlist> {
     fun getAlbums(): List<Album>
 
     /**
+     * Get cached album tracks.
+     */
+    fun getAlbumTracks(albumId: String): List<Track>?
+
+    /**
      * Callback when artists are ready.
      */
     fun artistsWhenReady(performAction: (List<Artist>?) -> Unit): Boolean
@@ -356,7 +361,7 @@ abstract class AbstractMusicSource : MusicSource {
                     }
                 }
                 else -> {
-                    performAction(null) // Will be loaded fresh
+                    performAction(getAlbumTracks(albumId))
                     true
                 }
             }

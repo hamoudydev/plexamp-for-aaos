@@ -71,13 +71,43 @@ Root
 
 ## Building
 
-1. Clone the repository
-2. Create `local.properties` with your signing key configuration
-3. Build with Android Studio or `./gradlew assembleRelease`
+### Prerequisites
+
+1. Clone this repository
+2. Clone the kotlin-plexapi fork with library browsing support:
+   ```bash
+   git clone -b feature/library-browsing https://github.com/hamoudydev/kotlin-plexapi.git
+   cd kotlin-plexapi
+   ./gradlew publishToMavenLocal
+   ```
+3. Create `local.properties` in the plex-aaos root with:
+   ```properties
+   sdk.dir=/path/to/Android/sdk
+   gpr_user=your-github-username
+   gpr_key=your-github-token  # needs read:packages scope
+   # Optional for release builds:
+   # signing_key_path=/path/to/keystore.jks
+   # signing_key_password=your-password
+   # signing_key_alias=your-alias
+   ```
+
+### Build
+
+```bash
+./gradlew assembleDebug
+# or for release:
+./gradlew assembleRelease
+```
+
+### Install on Emulator
+
+```bash
+./gradlew :automotive:installDebug
+```
 
 ## Dependencies
 
-- [kotlin-plexapi](https://github.com/joeyberkovitz/kotlin-plexapi) - Plex API client library
+- [kotlin-plexapi](https://github.com/hamoudydev/kotlin-plexapi/tree/feature/library-browsing) - Plex API client library (fork with library browsing support)
 - ExoPlayer - Media playback
 - Glide - Image loading
 

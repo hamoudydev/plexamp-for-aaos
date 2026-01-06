@@ -563,6 +563,7 @@ class MyMusicService : MediaBrowserServiceCompat() {
                     if (tracks != null) {
                         val children = tracks.map { track ->
                             val metadata = MediaMetadataCompat.Builder().fromAlbumTrack(track, albumId).build()
+                            logger.debug("Album track mediaId: ${metadata.description.mediaId}, title: ${track.title}")
                             MediaItem(metadata.description, MediaItem.FLAG_PLAYABLE)
                         }
                         logger.info("Sending ${children.size} tracks for album $albumId")
@@ -924,7 +925,7 @@ class MyMusicService : MediaBrowserServiceCompat() {
             playWhenReady: Boolean,
             extras: Bundle?
         ) {
-            logger.info("onPrepareFromMediaId: $prepareId, $playWhenReady")
+            logger.info("onPrepareFromMediaId called with: prepareId=$prepareId, playWhenReady=$playWhenReady")
             val idSplit = prepareId.split('/')
             if (idSplit.size != 2) {
                 logger.error("media id doesn't include parent id: $prepareId")

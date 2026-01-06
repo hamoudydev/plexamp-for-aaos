@@ -302,4 +302,6 @@ class PlexSource(
     override fun getArtists(): List<Artist> = artistsCache
 
     override fun getAlbums(): List<Album> = albumsCache
+
+    override fun getAlbumTracks(albumId: String): List<Track>? = albumTracksCache[albumId]
 }
