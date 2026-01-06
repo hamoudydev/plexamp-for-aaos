@@ -39,8 +39,8 @@ android {
         applicationId "us.berkovitz.plexaaos"
         minSdk 29
         targetSdk 36
-        versionCode 30
-        versionName "0.7.1"
+        versionCode 31
+        versionName "0.7.2"
 
         buildFeatures {
             buildConfig = true
@@ -100,7 +100,7 @@ dependencies {
     debugImplementation "androidx.compose.ui:ui-test-manifest:$compose_ui_version"
 
     implementation 'androidx.media:media:1.6.0'
-    implementation 'us.berkovitz:kotlin-plexapi:0.1.16'
+    implementation 'us.berkovitz:kotlin-plexapi:0.1.17'
 
     api "com.google.android.exoplayer:exoplayer-core:$exoplayer_version"
     api "com.google.android.exoplayer:exoplayer-ui:$exoplayer_version"

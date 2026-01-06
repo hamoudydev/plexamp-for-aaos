@@ -194,15 +194,19 @@ fun MediaMetadataCompat.Builder.from(
         iconUrl = AlbumArtContentProvider.mapUri(Uri.parse(iconUrl)).toString()
     }
 
+    var artistName = mediaItem.grandparentTitle
+    if(!mediaItem.originalTitle.isNullOrEmpty()){
+        artistName = mediaItem.originalTitle
+    }
 
     // To make things easier for *displaying* these, set the display properties as well.
     displayIconUri = iconUrl
     albumArtUri = iconUrl
     displayTitle = mediaItem.title
-    displaySubtitle = mediaItem.grandparentTitle
+    displaySubtitle = artistName
     displayDescription = mediaItem.parentTitle
 
-    artist = mediaItem.grandparentTitle
+    artist = artistName
     album = mediaItem.parentTitle
 
     // Add downloadStatus to force the creation of an "extras" bundle in the resulting
