@@ -110,17 +110,8 @@ class BrowseTree(
             flag = MediaItem.FLAG_BROWSABLE
         }.build()
 
-        val allMusicMetadata = MediaMetadataCompat.Builder().apply {
-            id = UAMP_ALL_MUSIC_ROOT
-            title = context.getString(R.string.all_music_title)
-            albumArtUri = RESOURCE_ROOT_URI +
-                    context.resources.getResourceEntryName(R.drawable.baseline_library_music_24)
-            flag = MediaItem.FLAG_BROWSABLE
-        }.build()
-
         rootList += homeMetadata
         rootList += playlistsMetadata
-        rootList += allMusicMetadata
         rootList += artistsMetadata
         rootList += albumsMetadata
         mediaIdToChildren[UAMP_BROWSABLE_ROOT] = rootList
@@ -368,7 +359,6 @@ const val UAMP_HOME_ROOT = "__HOME__"
 const val UAMP_RECENTLY_PLAYED_ROOT = "__RECENTLY_PLAYED__"
 const val UAMP_RECENTLY_ADDED_ROOT = "__RECENTLY_ADDED__"
 const val UAMP_ON_DECK_ROOT = "__ON_DECK__"
-const val UAMP_ALL_MUSIC_ROOT = "__ALL_MUSIC__"
 
 // Prefixes for media IDs
 const val ARTIST_PREFIX = "artist_"

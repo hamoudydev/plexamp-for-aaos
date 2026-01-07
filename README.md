@@ -44,7 +44,13 @@ Root
 
 ## Screenshots
 
-*Coming soon*
+| Home | Artists |
+|------|---------|
+| ![Home](screenshots/home.png) | ![Artists](screenshots/artists.png) |
+
+| Albums | All Music |
+|--------|-----------|
+| ![Albums](screenshots/albums.png) | ![All Music](screenshots/all-music.png) |
 
 ## Requirements
 

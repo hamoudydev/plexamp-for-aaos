@@ -9,7 +9,6 @@
     <string name="recently_played_title">Recently Played</string>
     <string name="recently_added_title">Recently Added</string>
     <string name="on_deck_title">On Deck</string>
-    <string name="all_music_title">All Music</string>
     <string name="title_activity_settings">SettingsActivity</string>
 
     <!-- Preference Titles -->

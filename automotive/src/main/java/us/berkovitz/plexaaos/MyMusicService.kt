@@ -52,7 +52,6 @@ import us.berkovitz.plexaaos.library.PlexSource
 import us.berkovitz.plexaaos.library.HOME_PREFIX
 import us.berkovitz.plexaaos.library.RESOURCE_ROOT_URI
 import us.berkovitz.plexaaos.library.UAMP_ALBUMS_ROOT
-import us.berkovitz.plexaaos.library.UAMP_ALL_MUSIC_ROOT
 import us.berkovitz.plexaaos.library.UAMP_ARTISTS_ROOT
 import us.berkovitz.plexaaos.library.UAMP_BROWSABLE_ROOT
 import us.berkovitz.plexaaos.library.UAMP_HOME_ROOT
@@ -610,76 +609,6 @@ class MyMusicService : MediaBrowserServiceCompat() {
                 }
             }
 
-            // All Music root - show alphabetical groupings
-            parentMediaId == UAMP_ALL_MUSIC_ROOT -> {
-                serviceScope.launch {
-                    try {
-                        mediaSource.loadAllTracks()
-                    } catch (exc: Exception) {
-                        logger.error("error loading all tracks: ${exc.message}")
-                    }
-                }
-                resultsSent = mediaSource.allTracksWhenReady { tracks ->
-                    if (tracks != null) {
-                        // Group tracks by first letter
-                        val letterGroups = mutableMapOf<String, Int>()
-                        tracks.forEach { track ->
-                            val firstChar = track.title.firstOrNull()?.uppercaseChar() ?: '#'
-                            val letter = if (firstChar.isLetter()) firstChar.toString() else "#"
-                            letterGroups[letter] = (letterGroups[letter] ?: 0) + 1
-                        }
-
-                        // Create browsable items for each letter
-                        val children = letterGroups.keys.sorted().map { letter ->
-                            val count = letterGroups[letter] ?: 0
-                            val metadata = MediaMetadataCompat.Builder().apply {
-                                putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, "${UAMP_ALL_MUSIC_ROOT}/letter_$letter")
-                                putString(MediaMetadataCompat.METADATA_KEY_TITLE, letter)
-                                putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, "$count songs")
-                                putLong(MediaMetadataCompat.METADATA_KEY_BT_FOLDER_TYPE, MediaDescriptionCompat.BT_FOLDER_TYPE_TITLES.toLong())
-                            }.build()
-                            MediaItem(metadata.description, MediaItem.FLAG_BROWSABLE)
-                        }
-                        logger.info("Sending ${children.size} letter groups for All Music")
-                        result.sendResult(children)
-                    } else {
-                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
-                        result.sendResult(null)
-                    }
-                }
-            }
-
-            // All Music letter filter - show tracks starting with specific letter
-            parentMediaId.startsWith("${UAMP_ALL_MUSIC_ROOT}/letter_") -> {
-                val letter = parentMediaId.removePrefix("${UAMP_ALL_MUSIC_ROOT}/letter_")
-                serviceScope.launch {
-                    try {
-                        mediaSource.loadAllTracks()
-                    } catch (exc: Exception) {
-                        logger.error("error loading all tracks: ${exc.message}")
-                    }
-                }
-                resultsSent = mediaSource.allTracksWhenReady { tracks ->
-                    if (tracks != null) {
-                        val filteredTracks = tracks.filter { track ->
-                            val firstChar = track.title.firstOrNull()?.uppercaseChar() ?: '#'
-                            val trackLetter = if (firstChar.isLetter()) firstChar.toString() else "#"
-                            trackLetter == letter
-                        }.sortedBy { it.title }
-
-                        val children = filteredTracks.map { track ->
-                            val metadata = MediaMetadataCompat.Builder().buildMeta(track, "${UAMP_ALL_MUSIC_ROOT}/letter_$letter")
-                            MediaItem(metadata.description, MediaItem.FLAG_PLAYABLE)
-                        }
-                        logger.info("Sending ${children.size} tracks for letter $letter")
-                        result.sendResult(children)
-                    } else {
-                        mediaSession.sendSessionEvent(NETWORK_FAILURE, null)
-                        result.sendResult(null)
-                    }
-                }
-            }
-
             // Artist detail - load albums for this artist
             parentMediaId.startsWith(ARTIST_PREFIX) -> {
                 val artistId = parentMediaId.removePrefix(ARTIST_PREFIX)
@@ -1141,49 +1070,6 @@ class MyMusicService : MediaBrowserServiceCompat() {
                             preparePlaylist(
                                 buildAlbumPlaylist(tracks, albumId),
                                 MediaMetadataCompat.Builder().fromAlbumTrack(itemToPlay, albumId).build(),
-                                playWhenReady,
-                                playbackStartPositionMs
-                            )
-                        }
-                    }
-                }
-            } else if (parentId.startsWith("${UAMP_ALL_MUSIC_ROOT}/letter_")) {
-                // All Music playback
-                val letter = parentId.removePrefix("${UAMP_ALL_MUSIC_ROOT}/letter_")
-                logger.info("Playing from All Music letter: $letter, track: $mediaId")
-
-                serviceScope.launch {
-                    try {
-                        mediaSource.loadAllTracks()
-                    } catch (exc: Exception) {
-                        logger.error("Failed to load all tracks: ${exc.message}")
-                    }
-                }
-                mediaSource.allTracksWhenReady { tracks ->
-                    serviceScope.launch {
-                        if (tracks == null) {
-                            logger.error("Failed to load all tracks")
-                            return@launch
-                        }
-                        // Filter tracks by letter
-                        val filteredTracks = tracks.filter { track ->
-                            val firstChar = track.title.firstOrNull()?.uppercaseChar() ?: '#'
-                            val trackLetter = if (firstChar.isLetter()) firstChar.toString() else "#"
-                            trackLetter == letter
-                        }.sortedBy { it.title }
-
-                        val itemToPlay = filteredTracks.find { it.ratingKey.toString() == mediaId }
-                        if (itemToPlay == null) {
-                            logger.warn("Track not found in All Music letter $letter: $mediaId")
-                        } else {
-                            val playbackStartPositionMs = extras?.getLong(
-                                MEDIA_DESCRIPTION_EXTRAS_START_PLAYBACK_POSITION_MS,
-                                C.TIME_UNSET
-                            ) ?: C.TIME_UNSET
-
-                            preparePlaylist(
-                                buildHomePlaylist(filteredTracks, parentId),
-                                MediaMetadataCompat.Builder().buildMeta(itemToPlay, parentId),
                                 playWhenReady,
                                 playbackStartPositionMs
                             )
