@@ -1,15 +1,12 @@
-# Unofficial Plex client for Android Automotive
+# Plexamp for Android Automotive
 
-This app is a Plex music client for Android Automotive.
-
-The application is available in the [Play Store](https://play.google.com/store/apps/details?id=us.berkovitz.plexaaos)
+A Plex music client for Android Automotive OS.
 
 ## Features
 
 ### Music Browsing
 - **Home** - Quick access to Recently Played tracks and Recently Added albums
 - **Playlists** - Browse and play your Plex playlists (large playlists grouped alphabetically)
-- **All Music** - Browse all tracks in your library, grouped alphabetically (A-Z, #)
 - **Artists** - Browse all artists, view their albums, and play tracks
 - **Albums** - Browse all albums and play tracks
 
@@ -32,15 +29,11 @@ Root
 │   └── Recently Added → Albums → Tracks
 ├── Playlists
 │   └── [Playlist] → [A-Z groups] → Tracks
-├── All Music
-│   └── [A-Z] → Tracks
 ├── Artists
 │   └── [Artist] → [Albums] → Tracks
 └── Albums
     └── [Album] → Tracks
 ```
-
-*Note: Android Auto displays up to 4 tabs. The order is: Home, Playlists, All Music, Artists (Albums is accessible but may require scrolling).*
 
 ## Screenshots
 
@@ -60,14 +53,17 @@ Root
 
 ## Changelog
 
-### v0.8.0 (Unreleased)
+### v1.0.0
+- Rebranded as Plexamp for AAOS
+- New package name: `us.tiba.plexamp`
+- Now uses JitPack for API dependency
+
+### v0.8.0
 - Added Home tab with Recently Played and Recently Added sections
-- Added All Music tab - browse all tracks grouped alphabetically (A-Z, #)
-- Large playlists now grouped alphabetically instead of by page numbers
 - Added Artists browsing - view all artists, their albums, and tracks
 - Added Albums browsing - view all albums and their tracks
+- Large playlists now grouped alphabetically
 - New icons for browse categories
-- Playback support for album-based track selection
 
 ### v0.7.2
 - Artist name now uses `originalTitle` if present
@@ -79,30 +75,14 @@ Root
 - Added offline playback support
 - Track prefetching for better streaming experience
 
-## TODOs
-
-- Multi-server support
-- Multi-user support
-- Relay fallback when direct connect fails
-- Improved login logic
-- ~~Support for music selection other than playlists~~ ✓ Implemented
-
 ## Building
 
 ### Prerequisites
 
 1. Clone this repository
-2. Clone the kotlin-plexapi fork with library browsing support:
-   ```bash
-   git clone -b feature/library-browsing https://github.com/hamoudydev/kotlin-plexapi.git
-   cd kotlin-plexapi
-   ./gradlew publishToMavenLocal
-   ```
-3. Create `local.properties` in the plex-aaos root with:
+2. Create `local.properties` in the root with:
    ```properties
    sdk.dir=/path/to/Android/sdk
-   gpr_user=your-github-username
-   gpr_key=your-github-token  # needs read:packages scope
    # Optional for release builds:
    # signing_key_path=/path/to/keystore.jks
    # signing_key_password=your-password
@@ -125,13 +105,19 @@ Root
 
 ## Dependencies
 
-- [kotlin-plexapi](https://github.com/hamoudydev/kotlin-plexapi/tree/feature/library-browsing) - Plex API client library (fork with library browsing support)
+- [plexamp-for-aaos-api](https://github.com/hamoudydev/plexamp-for-aaos-api) - Plex API client library (via JitPack)
 - ExoPlayer - Media playback
 - Glide - Image loading
 
 ## License
 
-Apache 2.0
+MIT License
+
+Based on original work by Joey Berkovitz.
+
+## Author
+
+Hamoudy Tiba
 
 ## Contributing
 

@@ -7,16 +7,7 @@ plugins {
 }
 
 repositories {
-    mavenLocal() // Use local build of kotlin-plexapi during development
-    maven {
-        url = uri("https://maven.pkg.github.com/joeyberkovitz/kotlin-plexapi")
-        credentials {
-            Properties properties = new Properties()
-            properties.load(project.rootProject.file('local.properties').newDataInputStream())
-            username = properties.getProperty("gpr_user") ?: System.getenv("GITHUB_ACTOR")
-            password = properties.getProperty("gpr_key") ?: System.getenv("GITHUB_TOKEN")
-        }
-    }
+    maven { url 'https://jitpack.io' }
     google()
     mavenCentral()
 }
@@ -35,15 +26,15 @@ android {
             }
         }
     }
-    namespace 'us.berkovitz.plexaaos'
+    namespace 'us.tiba.plexamp'
     compileSdk 36
 
     defaultConfig {
-        applicationId "us.berkovitz.plexaaos"
+        applicationId "us.tiba.plexamp"
         minSdk 29
         targetSdk 36
-        versionCode 31
-        versionName "0.7.2"
+        versionCode 32
+        versionName "1.0.0"
 
         buildFeatures {
             buildConfig = true
@@ -102,7 +93,7 @@ dependencies {
     debugImplementation "androidx.compose.ui:ui-test-manifest:$compose_ui_version"
 
     implementation 'androidx.media:media:1.6.0'
-    implementation 'us.berkovitz:kotlin-plexapi:0.2.0'
+    implementation 'com.github.hamoudydev:plexamp-for-aaos-api:1.0.0'
 
     api "com.google.android.exoplayer:exoplayer-core:$exoplayer_version"
     api "com.google.android.exoplayer:exoplayer-ui:$exoplayer_version"
