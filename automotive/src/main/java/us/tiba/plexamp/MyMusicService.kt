@@ -114,8 +114,8 @@ import kotlin.math.min
  *
  */
 
-const val LOGIN = "us.berkovitz.plexaaos.COMMAND.LOGIN"
-const val REFRESH = "us.berkovitz.plexaaos.COMMAND.REFRESH"
+const val LOGIN = "us.tiba.plexamp.COMMAND.LOGIN"
+const val REFRESH = "us.tiba.plexamp.COMMAND.REFRESH"
 
 
 class MyMusicService : MediaBrowserServiceCompat() {
@@ -1344,7 +1344,7 @@ class MyMusicService : MediaBrowserServiceCompat() {
     }
 }
 
-const val NETWORK_FAILURE = "us.berkovitz.plexaaos.NETWORK_FAILURE"
+const val NETWORK_FAILURE = "us.tiba.plexamp.NETWORK_FAILURE"
 
 /** Content styling constants */
 private const val CONTENT_STYLE_BROWSABLE_HINT = "android.media.browse.CONTENT_STYLE_BROWSABLE_HINT"

@@ -285,5 +285,5 @@ fun MediaMetadataCompat.toMediaItem(): com.google.android.exoplayer2.MediaItem {
  * Custom property that holds whether an item is [MediaItem.FLAG_BROWSABLE] or
  * [MediaItem.FLAG_PLAYABLE].
  */
-const val METADATA_KEY_UAMP_FLAGS = "us.berkovitz.plexaaos.METADATA_KEY_UAMP_FLAGS"
+const val METADATA_KEY_UAMP_FLAGS = "us.tiba.plexamp.METADATA_KEY_UAMP_FLAGS"
 

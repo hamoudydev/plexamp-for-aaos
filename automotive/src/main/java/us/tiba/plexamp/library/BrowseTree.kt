@@ -365,4 +365,4 @@ const val ARTIST_PREFIX = "artist_"
 const val ALBUM_PREFIX = "album_"
 const val HOME_PREFIX = "home_"
 
-const val RESOURCE_ROOT_URI = "android.resource://us.berkovitz.plexaaos/drawable/"
+const val RESOURCE_ROOT_URI = "android.resource://us.tiba.plexamp/drawable/"

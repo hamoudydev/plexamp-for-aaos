@@ -33,7 +33,7 @@ android {
         applicationId "us.tiba.plexamp"
         minSdk 29
         targetSdk 36
-        versionCode 32
+        versionCode 35
         versionName "1.0.0"
 
         buildFeatures {
@@ -50,6 +50,9 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (signingConfigs.findByName('release')) {
+                signingConfig signingConfigs.release
+            }
         }
     }
     compileOptions {
