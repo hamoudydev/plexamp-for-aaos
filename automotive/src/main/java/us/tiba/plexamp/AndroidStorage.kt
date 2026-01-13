@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 object AndroidStorage {
     private const val SHARED_PREFS_NAME = "plexaaos"
     private const val SERVER = "server"
+    private const val LIBRARY = "library"
     private const val LAST_MEDIA_ID = "last_media_id"
     private const val LAST_POSITION = "last_position"
     private const val SHUFFLE_ENABLED = "shuffle_enabled"
@@ -76,6 +77,18 @@ object AndroidStorage {
             return
         }
         return setKey(SERVER, server, context)
+    }
+
+    suspend fun getLibrary(context: Context): String? {
+        return getKey(LIBRARY, context)
+    }
+
+    suspend fun setLibrary(libraryKey: String?, context: Context){
+        if(libraryKey == null){
+            removeKey(LIBRARY, context)
+            return
+        }
+        return setKey(LIBRARY, libraryKey, context)
     }
 
 }

@@ -11,6 +11,7 @@ import us.tiba.plexamp.PlexLoggerFactory
 import us.tiba.plexamp.PlexUtil
 import us.tiba.plexapi.media.Album
 import us.tiba.plexapi.media.Artist
+import us.tiba.plexapi.media.LibrarySection
 import us.tiba.plexapi.media.MediaItem
 import us.tiba.plexapi.media.Playlist
 import us.tiba.plexapi.media.PlaylistType
@@ -130,12 +131,22 @@ class PlexSource(
                 return@withContext STATE_ERROR
             }
 
-            // Find music library section
+            // Find music library section - check for user-selected library first
             try {
-                val musicSection = plexServer!!.musicSection()
+                val selectedLibrary = AndroidStorage.getLibrary(context)
+                val musicSections = plexServer!!.librarySections().filter { it.type == "artist" }
+
+                val musicSection = if (selectedLibrary != null) {
+                    // Use user-selected library
+                    musicSections.find { it.key == selectedLibrary } ?: musicSections.firstOrNull()
+                } else {
+                    // Auto-select first music library
+                    musicSections.firstOrNull()
+                }
+
                 if (musicSection != null) {
                     musicSectionId = musicSection.key
-                    logger.info("Found music section: ${musicSection.title} (id: ${musicSection.key})")
+                    logger.info("Using music section: ${musicSection.title} (id: ${musicSection.key})")
                 } else {
                     logger.warn("No music library section found")
                 }
@@ -153,6 +164,30 @@ class PlexSource(
                 playlist.items()
             }*/
             return@withContext STATE_INITIALIZED
+        }
+    }
+
+    /**
+     * Get all music library sections from the server.
+     * Returns a list of LibrarySection objects with type="artist".
+     */
+    suspend fun getMusicLibraries(): List<LibrarySection> {
+        return withContext(Dispatchers.IO) {
+            findServer()
+            if (plexServer == null) {
+                logger.warn("Cannot get music libraries: server not available")
+                return@withContext emptyList()
+            }
+
+            try {
+                val allSections = plexServer!!.librarySections()
+                val musicSections = allSections.filter { it.type == "artist" }
+                logger.info("Found ${musicSections.size} music libraries")
+                return@withContext musicSections
+            } catch (e: Exception) {
+                logger.error("Error getting music libraries: ${e.message}")
+                return@withContext emptyList()
+            }
         }
     }
 

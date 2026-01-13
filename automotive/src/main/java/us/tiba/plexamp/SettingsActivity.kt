@@ -44,7 +44,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
+import us.tiba.plexamp.library.PlexSource
 import us.tiba.plexamp.ui.theme.PlexAAOSTheme
+import us.tiba.plexapi.media.LibrarySection
 import us.tiba.plexapi.myplex.MyPlexResource
 import us.tiba.plexapi.myplex.MyPlexUser
 import us.tiba.plexapi.storage.Storage
@@ -54,6 +56,7 @@ class SettingsActivity : ComponentActivity() {
 
     lateinit var plexUtil: PlexUtil
     private lateinit var musicServiceConnection: MusicServiceConnection
+    private var plexSource: PlexSource? = null
     var plexToken: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,6 +69,10 @@ class SettingsActivity : ComponentActivity() {
 
         plexUtil = PlexUtil(this)
         plexToken = plexUtil.getToken()
+
+        if (plexToken != null) {
+            plexSource = PlexSource(plexToken!!, applicationContext)
+        }
 
         actionBar?.setDisplayHomeAsUpEnabled(true)
 
@@ -80,6 +87,7 @@ class SettingsActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     SelectServerDropdown()
+                    SelectLibraryDropdown()
                     SelectUserSetting()
                 }
             }
@@ -186,6 +194,101 @@ class SettingsActivity : ComponentActivity() {
 
     private suspend fun selectServer(server: MyPlexResource?) {
         AndroidStorage.setServer(server?.clientIdentifier, this)
+        notifyRefresh()
+    }
+
+    @OptIn(ExperimentalMaterialApi::class)
+    @SuppressLint("CoroutineCreationDuringComposition")
+    @Composable
+    fun SelectLibraryDropdown() {
+        val coroutineScope = rememberCoroutineScope()
+        var expanded by remember { mutableStateOf(false) }
+        var selectedIndex by remember { mutableStateOf(-1) }
+        var selectedOptionText by remember { mutableStateOf(getLibraryText(null, -1)) }
+        var libraries by remember { mutableStateOf<List<LibrarySection>>(emptyList()) }
+        if (libraries.isEmpty() && plexSource != null) {
+            coroutineScope.launch {
+                libraries = plexSource!!.getMusicLibraries()
+                selectedIndex = getCurrentLibrary(libraries)
+                selectedOptionText = getLibraryText(libraries, selectedIndex)
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .wrapContentSize(Alignment.TopStart),
+        ) {
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = !expanded },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                TextField(
+                    readOnly = true,
+                    value = selectedOptionText,
+                    onValueChange = {},
+                    label = { Text("Library:", fontSize = 30.sp) },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                    },
+                    colors = ExposedDropdownMenuDefaults.textFieldColors(
+                        unfocusedLabelColor = Color.Gray
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = TextStyle(
+                        fontSize = 30.sp
+                    )
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    DropdownMenuItem(onClick = {
+                        selectedIndex = -1
+                        expanded = false
+                        selectedOptionText = getLibraryText(libraries, selectedIndex)
+                        coroutineScope.launch {
+                            selectLibrary(null)
+                        }
+                    }) {
+                        Text(text = "Auto")
+                    }
+                    libraries.forEachIndexed { index, library ->
+                        DropdownMenuItem(onClick = {
+                            selectedIndex = index
+                            expanded = false
+                            selectedOptionText = getLibraryText(libraries, selectedIndex)
+                            coroutineScope.launch {
+                                selectLibrary(library)
+                            }
+                        }) {
+                            Text(text = library.title)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun getLibraryText(libraries: List<LibrarySection>?, index: Int): String {
+        if (libraries.isNullOrEmpty() || index < 0 || index > libraries.lastIndex) {
+            return "Auto"
+        }
+        return libraries[index].title
+    }
+
+    private suspend fun getCurrentLibrary(libraries: List<LibrarySection>?): Int {
+        val selectedLibrary = AndroidStorage.getLibrary(this)
+        if (libraries == null || selectedLibrary == null) {
+            return -1
+        }
+
+        return libraries.indexOfFirst { librarySection -> librarySection.key == selectedLibrary }
+    }
+
+    private suspend fun selectLibrary(library: LibrarySection?) {
+        AndroidStorage.setLibrary(library?.key, this)
         notifyRefresh()
     }
 
